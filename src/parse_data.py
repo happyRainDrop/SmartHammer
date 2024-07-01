@@ -9,7 +9,7 @@ vals_1 = []
 vals_2 = [] 
 vals_3 = [] 
 vals_4 = [] 
-pot_val = 10000
+pot_val = 1000
 ref_voltage = 3.3
 MAX_TIME = 10 # in ms
 
@@ -50,7 +50,11 @@ with open(file_name,'r') as csvfile:
         vals_3.append(raw_val_to_force(int(row[3]))) 
         vals_4.append(raw_val_to_force(int(row[4]))) 
 
-plt.plot(times, vals_1, '-o') 
+plt.plot(times, vals_1, color = "gray")
+plt.plot(times, vals_2, color = "yellow") 
+plt.plot(times, vals_3, color = "green") 
+plt.plot(times, vals_4, color = "blue") 
+
 plt.xticks(rotation = 25) 
 plt.xlabel('Time (milleseconds)') 
 plt.ylabel('Force (lbs)') 
