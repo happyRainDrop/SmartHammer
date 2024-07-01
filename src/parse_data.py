@@ -9,8 +9,9 @@ vals_1 = []
 vals_2 = [] 
 vals_3 = [] 
 vals_4 = [] 
-pot_val = 4310
-ref_voltage = 5
+pot_val = 10000
+ref_voltage = 3.3
+MAX_TIME = 10 # in ms
 
 def raw_val_to_force(raw_val):
     m = 0.0151105
@@ -21,7 +22,7 @@ def raw_val_to_force(raw_val):
     read_voltage = raw_val * ref_voltage / 1024.0
     conductance = read_voltage / (pot_val*(ref_voltage-read_voltage))
     force_lbs = m * (conductance*1000000) + b
-    return force_lbs
+    return read_voltage
 
 # read latest file
 list_of_files = glob.glob('C:/Users/tealw/Documents/PlatformIO/Projects/SmartHammer/src/logs/*txt')
@@ -33,14 +34,14 @@ with open(file_name,'r') as csvfile:
     lines = csv.reader(csvfile, delimiter=',') 
     start_time = 0;
     for row in lines: 
-        if (int(row[1])==0):
+        if (len(row)>1 and int(row[1])==0):
             continue
 
         if (start_time == 0): 
             start_time = float(row[0])
 
         time = (float(row[0])-start_time)/1000.0
-        if (time > 1000):
+        if (time > MAX_TIME):
             break
 
         times.append(time) # convert to millesecond 
@@ -49,7 +50,7 @@ with open(file_name,'r') as csvfile:
         vals_3.append(raw_val_to_force(int(row[3]))) 
         vals_4.append(raw_val_to_force(int(row[4]))) 
 
-plt.scatter(times, vals_1, color = 'g',s = 10) 
+plt.plot(times, vals_1, '-o') 
 plt.xticks(rotation = 25) 
 plt.xlabel('Time (milleseconds)') 
 plt.ylabel('Force (lbs)') 
