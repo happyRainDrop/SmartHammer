@@ -29,6 +29,7 @@ def find_arduino(port=None):
         for p in ports:
             if p.manufacturer is not None and "Arduino" in p.manufacturer:
                 port = p.device
+                return port
     return port
 
 
@@ -239,6 +240,7 @@ voltages = []
 async def main():
     # Initialize your Arduino connection here
     port = find_arduino()
+    print(f"Found Arduino on port {port}.")
     arduino = serial.Serial(port, baudrate=115200)
     handshake_arduino(arduino, 1, True)
     await read_arduino_serial(arduino, times, voltages)

@@ -10,8 +10,8 @@ vals_2 = []
 vals_3 = [] 
 vals_4 = [] 
 pot_val = 1000
-ref_voltage = 3.3
-MAX_TIME = 10 # in ms
+ref_voltage = 5
+MAX_TIME = 100 # in ms
 
 def raw_val_to_force(raw_val):
     m = 0.0151105
@@ -57,7 +57,7 @@ plt.plot(times, vals_4, color = "blue")
 
 plt.xticks(rotation = 25) 
 plt.xlabel('Time (milleseconds)') 
-plt.ylabel('Force (lbs)') 
+plt.ylabel('Voltage (V)') 
 plt.title('Force over time', fontsize = 20) 
   
 plt.show() 
