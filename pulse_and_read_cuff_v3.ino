@@ -1,10 +1,10 @@
 // variables and constants
 const int TRIGGER_PIN = 3;
-const int TURN_ON_OSC = 8;
+const int TURN_ON_OSC = 2;
 const int CUFF_READ_PIN = A0;
 const int DATA_LENGTH = 200;
 const int DATA_LENGTH_DURING_PULSE = 37;
-const int NUM_PULSES_TO_SAVE = 20;
+const int NUM_PULSES_TO_SAVE = 55;
 const int NUM_PULSES_TO_SAVE_BEFORE_HAMMER = 5;
 
 // DELAY_LENGTH, NOP_LEN
@@ -127,32 +127,28 @@ void printCuffData() {
 }
 
 void loop() {
-    if (stopReading)  {
-      Serial.println("Reading stopped");
-      delay(1000);
-    } else {
-        pulseTriggered = (digitalRead(TRIGGER_PIN) == HIGH); 
-        if (pulseTriggered) { 
-            // save the time and stop reading
-            stopReading = true;
-            pulseTriggeredTime = micros();
-            
-            // save some of the readings before the hammer hit
-            start_data_it = (curr_data_it - NUM_PULSES_TO_SAVE_BEFORE_HAMMER + NUM_PULSES_TO_SAVE) % NUM_PULSES_TO_SAVE;
+    pulseTriggered = (digitalRead(TRIGGER_PIN) == HIGH); 
+    if (pulseTriggered) { 
+        // save the time and stop reading
+        pulseTriggeredTime = micros();
+        
+        // save some of the readings before the hammer hit
+        start_data_it = (curr_data_it - NUM_PULSES_TO_SAVE_BEFORE_HAMMER + NUM_PULSES_TO_SAVE) % NUM_PULSES_TO_SAVE;
 
-            // and reading some more readings after the hammer hit
-            for (int i = 0; i < NUM_PULSES_TO_SAVE - NUM_PULSES_TO_SAVE_BEFORE_HAMMER; i++) {
-              saveCuffData();
-              delayMicroseconds(DELAY_LEN);
-            }
-
-            // lastly, print the data.
-            printCuffData();
-
-        } else {
+        // and reading some more readings after the hammer hit
+        for (int i = 0; i < NUM_PULSES_TO_SAVE - NUM_PULSES_TO_SAVE_BEFORE_HAMMER; i++) {
           saveCuffData();
           delayMicroseconds(DELAY_LEN);
         }
+
+        // lastly, print the data.
+        printCuffData();
+        Serial.println("==============");
+        delay(1000); // wait 1 second before checking for another pulse
+
+    } else {
+      saveCuffData();
+      delayMicroseconds(DELAY_LEN);
     }
 
 }
