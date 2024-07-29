@@ -9,16 +9,26 @@ import matplotlib.pyplot as plt
 import csv
 import pandas as pd
 
+import argparse
+import matplotlib.gridspec as gridspec
+
+# Stuff for user to edit.
+ports = ['COM9', 'COM20']  # hammer port, cuff port
+baud_rate = 115200
+DATA_LENGTH =  200 # From cuff arduino
+files_folder_path = 'src/app_v1/'
+
 ##################################################################################################################################
 
-def is_valid_data(line):
+def is_valid_data(line, port):
     """
     Check if the line matches the format (positive or negative floating point number), (positive or negative floating point number)
     """
     cuff_pattern = re.compile(r'^-?\d+(\.\d+)?, -?\d+(\.\d+)?$')
     hammer_pattern = re.compile(r'^-?\d+(\.\d+)?, -?\d+(\.\d+)?, -?\d+(\.\d+)?$')
 
-    return cuff_pattern.match(line) is not None or hammer_pattern.match(line) is not None
+    if (port == ports[0]): return hammer_pattern.match(line) is not None
+    if (port == ports[1]): return cuff_pattern.match(line) is not None
 
 def read_from_serial(port, baud_rate, output_file, done_event):
     try:
@@ -38,20 +48,24 @@ def read_from_serial(port, baud_rate, output_file, done_event):
             while not done_writing_data:
 
                 if ser.in_waiting > 0:
-                    line = ser.readline().decode('utf-8').rstrip()
-                    
-                    # If valid data, save to csv
-                    if is_valid_data(line):
-                        if not saving_data:
-                            print(f"{port}: Starting to save data to CSV.")
-                        saving_data = True
-                        csvwriter.writerow(line.split(','))
+                    line = ser.readline()
+                    try:
+                        line = line.decode('utf-8').rstrip()                    
+                        # If valid data, save to csv
+                        if is_valid_data(line, port):
+                            if not saving_data:
+                                print(f"{port}: Starting to save data to CSV, found line {line} is valid")
+                            saving_data = True
+                            csvwriter.writerow(line.split(','))
+                        # Otherwise, we are done reading.
+                        else:
+                            if saving_data:
+                                print(f"{port}: Stopping data saving to CSV")
+                                done_writing_data = True
+                            saving_data = False
 
-                    # Otherwise, we are done reading.
-                    else:
-                        if saving_data:
-                            print(f"{port}: Stopping data saving to CSV.")
-                            done_writing_data = True
+                    except:
+                        print(f"{port}: line {line} invalid.")
                         saving_data = False
                         
     except serial.SerialException as e:
@@ -81,7 +95,7 @@ def find_outliers_std(data, threshold=3):
     
     return lower_outliers, upper_outliers, lower_bound, upper_bound
 
-def plot_heat_map(output_files, DATA_LENGTH):
+def plot_heat_map(output_files, DATA_LENGTH, png_name = "cuff_hammer_emg_combined"):
     hammer_csv = pd.read_csv(output_files[0]).to_numpy()
     cuff_csv = pd.read_csv(output_files[1]).to_numpy()
 
@@ -110,50 +124,69 @@ def plot_heat_map(output_files, DATA_LENGTH):
         
         cuff_times_reshaped.append(cuff_pulse_times)
         cuff_recieved_reshaped.append(cuff_pulse_data)
-        time_ticks.append(cuff_pulse_times[0])
+        time_ticks.append(round(cuff_pulse_times[0], 2))
     
-    # Plot
-    # Hammer and EMG signal    
-    plt.subplot(2,1,1)
-    plt.plot(hammer_times, hammer_recieved, color = "blue", label = "Hammer strike")
-    plt.plot(hammer_times, emg_recieved, color = "red", label = "EMG signal")
-    plt.xlim(time_ticks[0], time_ticks[-1])
+    # Plot using GridSpec
+    fig = plt.figure(figsize=(6, 8))
+    gs = gridspec.GridSpec(3, 1, height_ratios=[1, 1, 0.05])
 
-    plt.title('Hammer and EMG voltage vs time')
-    plt.ylabel('Voltage (V)')
-    plt.xlabel('Time (ms)')
-    plt.legend()
+    # Hammer and EMG signal subplot
+    ax1 = plt.subplot(gs[0])
+    ax1.plot(hammer_times, hammer_recieved, color="blue", label="Hammer strike")
+    ax1.plot(hammer_times, emg_recieved, color="red", label="EMG signal")
+    ax1.set_xlim(time_ticks[0], time_ticks[-1])
+    ax1.set_title('Hammer and EMG voltage vs time')
+    ax1.set_ylabel('Voltage (V)')
+    ax1.set_xlabel('Time (ms)')
+    ax1.legend()
 
-    # Cuff signal
-    plt.subplot(2,1,2)
-    cuff_vals_for_heatmap = np.asarray(cuff_recieved_reshaped) - np.asarray(cuff_recieved_reshaped)[0,:]
+    # Cuff signal subplot
+    ax2 = plt.subplot(gs[1])
+    cuff_vals_for_heatmap = np.asarray(cuff_recieved_reshaped) - np.asarray(cuff_recieved_reshaped)[0, :]
     lower_outliers, upper_outliers, lower_lim_imshow, upper_lim_imshow = find_outliers_std(cuff_vals_for_heatmap)
-    plt.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin = lower_lim_imshow, vmax = upper_lim_imshow)
+    im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim_imshow)
+    ax2.set_title('Circuit envelope: \nPulse height vs time normalize to start of pulse, all pulses overlayed')
+    ax2.set_ylabel('Array index within pulse')
+    ax2.set_xlabel('Start time of pulse (ms)')
+    time_tick_positions = np.arange(0, NUM_PULSES, NUM_PULSES / len(time_ticks))
+    ax2.set_xticks(ticks=time_tick_positions[0::5])
+    ax2.set_xticklabels(labels=time_ticks[0::5])
+    ax2.tick_params(axis='x', rotation=90)
 
-    plt.title('Circuit envelope: \nPulse height vs time normalize to start of pulse, all pulses overlayed')
-    plt.ylabel('Array index within pulse')
-    plt.xlabel('Start time of pulse (ms)')
-    time_tick_positions = np.arange(0, NUM_PULSES, NUM_PULSES/len(time_ticks))
-    plt.xticks(ticks = time_tick_positions[0::5], labels = time_ticks[0::5])
-    plt.xticks(rotation=90)
+    # Colorbar subplot
+    cbar_ax = plt.subplot(gs[2])
+    fig.colorbar(im, cax=cbar_ax, orientation='horizontal')
 
-    plt.subplots_adjust(hspace = 0.5)
+    plt.subplots_adjust(hspace=0.5)
     plt.tight_layout()
     plt.show()
-    plt.savefig("cuff_hammer_emg_combined.png")
 
+
+    # Save the figure before showing it
+    fig.savefig(files_folder_path + png_name + '.png')
+    plt.show()
+    plt.close(fig)
 
 
 
 if __name__ == "__main__":
     
-    # Stuff for user to edit.
-    ports = ['COM9', 'COM20']  # hammer port, cuff port
-    baud_rate = 115200
-    output_files = ['output_hammer.csv', 'output_cuff.csv']
-    DATA_LENGTH =  200 # From cuff arduino
+    parser = argparse.ArgumentParser(
+                    prog='ProgramName',
+                    description='What the program does',
+                    epilog='Text at the bottom of help')
 
-    '''
+    parser.add_argument('filename_suffix', type=str, help = 'appended to name of hammer,cuff csvs (do not include .csv postfix)') 
+    parser.add_argument('--file_path', type=str, help='to change the default path (can insert full or relative path)', nargs='?') 
+
+    args = parser.parse_args()
+    if args.file_path is not None: files_folder_path = args.file_path
+
+    output_files = [files_folder_path+'hammer_'+str(args.filename_suffix)+'.csv', 
+                    files_folder_path+'cuff_'+str(args.filename_suffix)+'.csv']
+
+    
+    # '''
     # Threading to read both serial ports simultaneously.
     done_events = [threading.Event() for _ in ports]
     threads = []
@@ -171,4 +204,4 @@ if __name__ == "__main__":
 
     test_output_files = ["src/logs/exp_6_no_remove_cuff/Arduino_data/hammer_trial_1_rachel.txt", 
                          "src/logs/exp_6_no_remove_cuff/Arduino_data/cuff_trial_1_rachel.txt"]
-    plot_heat_map(test_output_files, DATA_LENGTH)
+    plot_heat_map(output_files, DATA_LENGTH, str(args.filename_suffix))
