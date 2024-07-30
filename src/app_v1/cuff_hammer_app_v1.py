@@ -101,7 +101,7 @@ def plot_heat_map(output_files, DATA_LENGTH, png_name = "cuff_hammer_emg_combine
 
     hammer_times = hammer_csv[:,0]
     hammer_recieved = hammer_csv[:,1]
-    emg_recieved = hammer_csv[:,2]
+    emg_recieved = hammer_csv[:,2] * 10
     cuff_times = cuff_csv[:,0]
     cuff_recieved = cuff_csv[:,1]
     
