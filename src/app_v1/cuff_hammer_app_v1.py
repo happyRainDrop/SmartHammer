@@ -96,12 +96,12 @@ def find_outliers_std(data, threshold=3):
     return lower_outliers, upper_outliers, lower_bound, upper_bound
 
 def plot_heat_map(output_files, DATA_LENGTH, png_name = "cuff_hammer_emg_combined"):
-    hammer_csv = pd.read_csv(output_files[0]).to_numpy()
-    cuff_csv = pd.read_csv(output_files[1]).to_numpy()
+    hammer_csv = pd.read_csv(output_files[0], header=None).to_numpy()
+    cuff_csv = pd.read_csv(output_files[1], header=None).to_numpy()
 
     hammer_times = hammer_csv[:,0]
     hammer_recieved = hammer_csv[:,1]
-    emg_recieved = hammer_csv[:,1]
+    emg_recieved = hammer_csv[:,2]
     cuff_times = cuff_csv[:,0]
     cuff_recieved = cuff_csv[:,1]
     
@@ -186,7 +186,7 @@ if __name__ == "__main__":
                     files_folder_path+'cuff_'+str(args.filename_suffix)+'.csv']
 
     
-    # '''
+    #'''
     # Threading to read both serial ports simultaneously.
     done_events = [threading.Event() for _ in ports]
     threads = []
