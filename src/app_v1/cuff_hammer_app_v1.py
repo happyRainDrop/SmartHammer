@@ -101,7 +101,7 @@ def plot_heat_map(output_files, DATA_LENGTH, png_name = "cuff_hammer_emg_combine
 
     hammer_times = hammer_csv[:,0]
     hammer_recieved = hammer_csv[:,1]
-    emg_recieved = hammer_csv[:,2] * 10
+    emg_recieved = hammer_csv[:,2]
     cuff_times = cuff_csv[:,0]
     cuff_recieved = cuff_csv[:,1]
     
@@ -133,7 +133,7 @@ def plot_heat_map(output_files, DATA_LENGTH, png_name = "cuff_hammer_emg_combine
     # Hammer and EMG signal subplot
     ax1 = plt.subplot(gs[0])
     ax1.plot(hammer_times, hammer_recieved, color="blue", label="Hammer strike")
-    ax1.plot(hammer_times, emg_recieved, color="red", label="EMG signal")
+    # ax1.plot(hammer_times, emg_recieved, color="red", label="EMG signal")
     ax1.set_xlim(time_ticks[0], time_ticks[-1])
     ax1.set_title('Hammer and EMG voltage vs time')
     ax1.set_ylabel('Voltage (V)')
