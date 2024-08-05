@@ -12,6 +12,8 @@ import pandas as pd
 import argparse
 import matplotlib.gridspec as gridspec
 
+from matplotlib.widgets import RectangleSelector
+
 # Stuff for user to edit.
 ports = ['COM9', 'COM20']  # hammer port, cuff port
 baud_rate = 115200
@@ -95,13 +97,14 @@ def find_outliers_std(data, threshold=3):
     
     return lower_outliers, upper_outliers, lower_bound, upper_bound
 
-def plot_heat_map(output_files, DATA_LENGTH, png_name = "cuff_hammer_emg_combined"):
+
+def plot_heat_map(output_files, DATA_LENGTH, png_name = "cuff_hammer_emg_combined", use_emg = False):
     hammer_csv = pd.read_csv(output_files[0], header=None).to_numpy()
     cuff_csv = pd.read_csv(output_files[1], header=None).to_numpy()
 
     hammer_times = hammer_csv[:,0]
     hammer_recieved = hammer_csv[:,1]
-    emg_recieved = hammer_csv[:,2]
+    emg_recieved = hammer_csv[:,2] if use_emg else []
     cuff_times = cuff_csv[:,0]
     cuff_recieved = cuff_csv[:,1]
     
@@ -133,9 +136,10 @@ def plot_heat_map(output_files, DATA_LENGTH, png_name = "cuff_hammer_emg_combine
     # Hammer and EMG signal subplot
     ax1 = plt.subplot(gs[0])
     ax1.plot(hammer_times, hammer_recieved, color="blue", label="Hammer strike")
-    ax1.plot(hammer_times, emg_recieved, color="red", label="EMG signal")
+    if use_emg: ax1.plot(hammer_times, emg_recieved, color="red", label="EMG signal")
     ax1.set_xlim(time_ticks[0], time_ticks[-1])
-    ax1.set_title('Hammer and EMG voltage vs time')
+    if use_emg: ax1.set_title('Hammer and EMG voltage vs time') 
+    else: ax1.set_title("Hammer voltage vs time")
     ax1.set_ylabel('Voltage (V)')
     ax1.set_xlabel('Time (ms)')
     ax1.legend()
@@ -157,26 +161,67 @@ def plot_heat_map(output_files, DATA_LENGTH, png_name = "cuff_hammer_emg_combine
     cbar_ax = plt.subplot(gs[2])
     fig.colorbar(im, cax=cbar_ax, orientation='horizontal')
 
-    plt.subplots_adjust(hspace=0.5)
-    plt.tight_layout()
-    plt.show()
+    ############################################################# Stuff to select area and find max point
+    max_amplitude_text = ax2.text(0, 0, '', color='white', fontsize=12, ha='center')
+    max_point_marker, = ax2.plot([], [], 'ro')
+
+    def on_select(eclick, erelease):
+        # Get the coordinates of the rectangle
+        x1, y1 = int(eclick.xdata), int(eclick.ydata)
+        x2, y2 = int(erelease.xdata), int(erelease.ydata)
+        
+        # Define the rectangle area
+        x_min, x_max = sorted([x1, x2])
+        y_min, y_max = sorted([y1, y2])
+        data = np.transpose(cuff_vals_for_heatmap)
+        absdata = np.abs(np.transpose(cuff_vals_for_heatmap))
+
+        # Get the subarray of the selected area
+        selected_area = absdata[y_min:y_max+1, x_min:x_max+1]
+        
+        # Find the indices of the maximum value within the selected area
+        max_idx = np.unravel_index(np.argmax(selected_area), selected_area.shape)
+        max_y, max_x = max_idx[0] + y_min, max_idx[1] + x_min
+        max_value = data[max_y, max_x]
+        time_of_max = np.transpose(cuff_times_reshaped)[max_y, max_x]
+        
+        # Update the annotation and marker
+        max_amplitude_text.set_position((max_x, max_y))
+        max_amplitude_text.set_text(f'{time_of_max}, {max_value:.2f}')
+        max_point_marker.set_data(max_x, max_y)
+        
+        # Print the row and column index of the maximum point
+        print(f'Manual select found: Maximum muscle contraction found at {time_of_max} ms after hammer hit')
+        
+        # Redraw the figure to update the annotation and marker
+        fig.savefig(files_folder_path + png_name + '.png')
+        fig.canvas.draw_idle()
+
+    # Create the RectangleSelector
+    rect_selector = RectangleSelector(ax2, on_select, useblit=True,
+                                        button=[1], minspanx=5, minspany=5, spancoords='pixels',
+                                        interactive=True)
 
 
     # Save the figure before showing it
-    fig.savefig(files_folder_path + png_name + '.png')
+    plt.subplots_adjust(hspace=1)
     plt.show()
     plt.close(fig)
-
-    col_nums = [40, 100, 130]
-    time_diff = (cuff_pulse_times[-1] - cuff_pulse_times[0])/len(cuff_pulse_times)  # diff btw cols in ms
-    for col in col_nums:
-        plt.plot(np.array(cuff_times_reshaped)[:, col] + col * time_diff, np.array(cuff_recieved_reshaped)[:, col]/np.min(np.array(cuff_recieved_reshaped)[:, col][50:]), label = "column "+str(col))
-    plt.plot(hammer_times, emg_recieved-2)
-    plt.plot(hammer_times, np.array(emg_recieved)/np.array(emg_recieved))
-    #plt.xlim(30,50)
-    plt.legend()
-    plt.show()
-
+    
+    # Return time of reflex
+    min_reflex_time = 28 # in ms
+    max_reflex_time = 50 # in ms
+    min_reflex_index_within_pulse = 30
+    reflex_time = 0
+    max_amplitude_heat_map = 0
+    for r in range(NUM_PULSES):
+        for c in range(min_reflex_index_within_pulse, DATA_LENGTH):
+            amplitude_diff = cuff_recieved_reshaped[r][c] - cuff_recieved_reshaped[0][c]
+            if (cuff_times_reshaped[r][c] < min_reflex_time or cuff_times_reshaped[r][c] > max_reflex_time): continue
+            if np.abs(amplitude_diff) > max_amplitude_heat_map and amplitude_diff > lower_lim_imshow and amplitude_diff < upper_lim_imshow:
+                max_amplitude_heat_map = np.abs(amplitude_diff)
+                reflex_time = cuff_times_reshaped[r][c]
+    print(f"Auto-detect found: Maximum muscle contraction found at {reflex_time} ms after hammer hit.")
 
 
 if __name__ == "__main__":
@@ -196,7 +241,7 @@ if __name__ == "__main__":
                     files_folder_path+'cuff_'+str(args.filename_suffix)+'.csv']
 
     
-    # '''
+    #''' 
     # Threading to read both serial ports simultaneously.
     done_events = [threading.Event() for _ in ports]
     threads = []
@@ -214,4 +259,4 @@ if __name__ == "__main__":
 
     test_output_files = ["src/app_v1/misc_trials/good_sina_trials/hammer_t1_sina_redo.csv", 
                          "src/app_v1/misc_trials/good_sina_trials/cuff_t1_sina_redo.csv"]
-    plot_heat_map(test_output_files, DATA_LENGTH, str(args.filename_suffix))
+    plot_heat_map(test_output_files, DATA_LENGTH, str(args.filename_suffix), True)
