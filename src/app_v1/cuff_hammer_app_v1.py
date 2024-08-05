@@ -133,7 +133,7 @@ def plot_heat_map(output_files, DATA_LENGTH, png_name = "cuff_hammer_emg_combine
     # Hammer and EMG signal subplot
     ax1 = plt.subplot(gs[0])
     ax1.plot(hammer_times, hammer_recieved, color="blue", label="Hammer strike")
-    # ax1.plot(hammer_times, emg_recieved, color="red", label="EMG signal")
+    ax1.plot(hammer_times, emg_recieved, color="red", label="EMG signal")
     ax1.set_xlim(time_ticks[0], time_ticks[-1])
     ax1.set_title('Hammer and EMG voltage vs time')
     ax1.set_ylabel('Voltage (V)')
@@ -167,6 +167,16 @@ def plot_heat_map(output_files, DATA_LENGTH, png_name = "cuff_hammer_emg_combine
     plt.show()
     plt.close(fig)
 
+    col_nums = [40, 100, 130]
+    time_diff = (cuff_pulse_times[-1] - cuff_pulse_times[0])/len(cuff_pulse_times)  # diff btw cols in ms
+    for col in col_nums:
+        plt.plot(np.array(cuff_times_reshaped)[:, col] + col * time_diff, np.array(cuff_recieved_reshaped)[:, col]/np.min(np.array(cuff_recieved_reshaped)[:, col][50:]), label = "column "+str(col))
+    plt.plot(hammer_times, emg_recieved-2)
+    plt.plot(hammer_times, np.array(emg_recieved)/np.array(emg_recieved))
+    #plt.xlim(30,50)
+    plt.legend()
+    plt.show()
+
 
 
 if __name__ == "__main__":
@@ -186,7 +196,7 @@ if __name__ == "__main__":
                     files_folder_path+'cuff_'+str(args.filename_suffix)+'.csv']
 
     
-    #'''
+    # '''
     # Threading to read both serial ports simultaneously.
     done_events = [threading.Event() for _ in ports]
     threads = []
@@ -202,6 +212,6 @@ if __name__ == "__main__":
     # Proceed to the next step of analyzing both CSVs
     print("Both threads are done. Proceeding to analyze the CSV files.")
 
-    test_output_files = ["src/logs/exp_6_no_remove_cuff/Arduino_data/hammer_trial_1_rachel.txt", 
-                         "src/logs/exp_6_no_remove_cuff/Arduino_data/cuff_trial_1_rachel.txt"]
-    plot_heat_map(output_files, DATA_LENGTH, str(args.filename_suffix))
+    test_output_files = ["src/app_v1/misc_trials/good_sina_trials/hammer_t1_sina_redo.csv", 
+                         "src/app_v1/misc_trials/good_sina_trials/cuff_t1_sina_redo.csv"]
+    plot_heat_map(test_output_files, DATA_LENGTH, str(args.filename_suffix))
