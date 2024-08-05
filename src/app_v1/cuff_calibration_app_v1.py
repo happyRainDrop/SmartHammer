@@ -6,9 +6,15 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from collections import deque
 
+################################################################# From Cuff Arduino
+port1 = "COM20"  # Replace with your Arduino's serial port
+baudrate1 = 115200
+DATA_LENGTH = 200 # number of points per pulse 
+################################################################
+
+
 # Flag to signal the thread to stop
 stop_thread = threading.Event()
-a = 1
 
 # Function to read from the serial port and save to a CSV file
 def read_from_serial(port, baudrate, output_file, data_queue):
@@ -22,12 +28,9 @@ def read_from_serial(port, baudrate, output_file, data_queue):
                 if re.match(r'^-?\d+(\.\d+)?, -?\d+(\.\d+)?$', line):
                     time, voltage = line.split(',')
                     data_queue.append((float(time), float(voltage)))
-                    if len(data_queue) > 100:
+                    if len(data_queue) > DATA_LENGTH:
                         data_queue.popleft()  # Keep the length of the queue manageable
                     # print(f"Time: {time}, Voltage: {voltage}")
-                else:
-                    a = 1
-                    # print(f"Format of {line} is wrong.")
             except:
                 print(f"{port}: line {line} invalid.")
         except serial.SerialException:
@@ -63,11 +66,9 @@ def on_close(event):
 
 # Example usage
 if __name__ == "__main__":
-    port1 = "COM20"  # Replace with your Arduino's serial port
-    baudrate1 = 115200
     output_file1 = None
     
-    data_queue1 = deque(maxlen=100)  # Queue to store incoming data for live plotting
+    data_queue1 = deque(maxlen=DATA_LENGTH)  # Queue to store incoming data for live plotting
 
     thread1 = start_serial_reading(port1, baudrate1, output_file1, data_queue1)
 

@@ -19,6 +19,7 @@ ports = ['COM9', 'COM20']  # hammer port, cuff port
 baud_rate = 115200
 DATA_LENGTH =  200 # From cuff arduino
 files_folder_path = 'src/app_v1/'
+file_name = 'test'
 
 ##################################################################################################################################
 
@@ -231,14 +232,15 @@ if __name__ == "__main__":
                     description='What the program does',
                     epilog='Text at the bottom of help')
 
-    parser.add_argument('filename_suffix', type=str, help = 'appended to name of hammer,cuff csvs (do not include .csv postfix)') 
+    parser.add_argument('--filename_suffix', type=str, help = 'appended to name of hammer,cuff csvs (do not include .csv postfix)') 
     parser.add_argument('--file_path', type=str, help='to change the default path (can insert full or relative path)', nargs='?') 
 
     args = parser.parse_args()
     if args.file_path is not None: files_folder_path = args.file_path
+    if args.filename_suffix is not None: file_name = str(args.filename_suffix)
 
-    output_files = [files_folder_path+'hammer_'+str(args.filename_suffix)+'.csv', 
-                    files_folder_path+'cuff_'+str(args.filename_suffix)+'.csv']
+    output_files = [files_folder_path+'hammer_'+file_name+'.csv', 
+                    files_folder_path+'cuff_'+file_name+'.csv']
 
     
     #''' 
@@ -259,4 +261,4 @@ if __name__ == "__main__":
 
     test_output_files = ["src/app_v1/misc_trials/good_sina_trials/hammer_t1_sina_redo.csv", 
                          "src/app_v1/misc_trials/good_sina_trials/cuff_t1_sina_redo.csv"]
-    plot_heat_map(test_output_files, DATA_LENGTH, str(args.filename_suffix), True)
+    plot_heat_map(test_output_files, DATA_LENGTH, str(args.filename_suffix))
