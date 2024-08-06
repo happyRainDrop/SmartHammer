@@ -1,5 +1,5 @@
 import serial
-import csv
+import sys
 import re
 import threading
 import matplotlib.pyplot as plt
@@ -90,3 +90,4 @@ if __name__ == "__main__":
     thread1.join(timeout=5)  # Wait for the thread to finish with a timeout
 
     print("Calibration complete.")
+    sys.exit(0)
