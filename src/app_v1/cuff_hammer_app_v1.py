@@ -1,3 +1,40 @@
+'''
+Name: cuff_hammer_app_v1.py
+Last updated: 8/14/26 by Ruth Berkun
+
+Table of contents:
+    Functions to parse Arduino serial data:
+        read_serial_data(port, baud_rate, output_file, done_event):
+            Reads in data from specific Arduino and saves it to a CSV
+        is_valid_data(line, port):
+            Is this line valid coming from the specified Arduino?
+    Functions to analyze cuff data:
+        get_reshaped_array_from_arduino_csv(output_files, DATA_LENGTH, use_emg = False):
+            Reads in Arduino cuff and hammer csvs, to output data in format needed for plot_heat_map
+        plot_heat_map(input_files, folder_path = files_folder_path, png_name = "cuff_hammer_emg_combined", stddev = 3, use_emg = False):
+            Plots hammer hit versus cuff heatmap, and allows user to select an area to search for the maximum intensity in.
+
+
+Instructions for use: 
+    RUNNING A LIVE EXPERIMENT: 
+        In testing mode:
+            Set read_live_data to true
+            Change ports to be the name of the COM ports used for your hammer and cuff Arduinos
+                (varies laptop to laptop)
+            baud_rate and DATA_LENGTH are hard-coded in the cuff and hammer Arduinos. 
+            Currently 115200 and 200 respectively.
+                
+            Run python cuff_hammer_app_v1.py in terminal.
+        To specify folder path and or file name to save csv and png files under: 
+            Run python cuff_hammer_app_v1.py --filename_suffix DESIRED_NAME --folder_path DESIRED_FOLDER_PATH
+
+    ANALYZING PREVIOUS EXPERIMENT DATA:
+        Set read_live_data to false
+        Run python cuff_hammer_app_v1.py --filename_suffix DESIRED_NAME --folder_path
+        For example, if you want to analyze folder1/hammer_test.csv and folder1/cuff_test.csv, you would run
+            python cuff_hammer_app_v1.py --filename_suffix test --folder_path folder1
+'''
+
 import serial
 import time
 import csv
@@ -18,15 +55,19 @@ from matplotlib.widgets import RectangleSelector
 ports = ['COM9', 'COM20']  # hammer port, cuff port
 baud_rate = 115200
 DATA_LENGTH =  200 # From cuff arduino
+read_live_data = False
+
+# Default folder path and file name used in testing mode
 files_folder_path = 'src/app_v1/'
 file_name = 'test'
-read_live_data = False
 
 ##################################################################################################################################
 
 def is_valid_data(line, port):
     """
     Check if the line matches the format (positive or negative floating point number), (positive or negative floating point number)
+    line: Line to check if it's valid serial data we want to save.
+    port: 'COM9' for example
     """
     cuff_pattern = re.compile(r'^-?\d+(\.\d+)?, -?\d+(\.\d+)?$')
     hammer_pattern = re.compile(r'^-?\d+(\.\d+)?, -?\d+(\.\d+)?, -?\d+(\.\d+)?$')
@@ -35,6 +76,19 @@ def is_valid_data(line, port):
     if (port == ports[1]): return cuff_pattern.match(line) is not None
 
 def read_from_serial(port, baud_rate, output_file, done_event):
+    '''
+    Reads in data from specific Arduino and saves it to a CSV. Starts saving data once
+    it reads in a valid line (as specified by helped function is_valid data). Stops saving
+    data once it reads in an invalid line after saving >0 valid lines.
+
+    Inputs:
+        port: 'COM9' for example
+        baud_rate: Serial baud rate specified on Arduino program
+        output_file: Path to save csv to
+        done_event: Threading event, used to tell us when we are done reading Serial
+    Outputs:
+        csv saved to path specified at output_file
+    '''
     try:
         # Initialize the serial connection
         ser = serial.Serial(port, baud_rate)
@@ -85,6 +139,18 @@ def read_from_serial(port, baud_rate, output_file, done_event):
 ##################################################################################################################################
 
 def find_outliers_std(data, threshold=3):
+    '''
+    Helper function to set minimum and maximum bounds on data that exclude outliers
+    Inputs:
+        data: 1D array to analyze
+        threshhold: Data outside [threshold] standard deviations will not be included within the minimum, maximum bounds
+    Outputs:
+        lower_outliers: Values of data below [threshold] standard deviations from the mean
+        upper_outliers: Values of data above [threshold] standard deviations from the mean
+        lower_bound: Number exactly at [threshold] standard deviations below the mean
+        uppder_bound: Number exactly at [threshold] standard deviations above the mean
+    '''
+
     # Calculate the mean and standard deviation
     mean = np.mean(data)
     std_dev = np.std(data)
