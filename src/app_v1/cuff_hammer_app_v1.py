@@ -65,9 +65,12 @@ file_name = 'test'
 
 def is_valid_data(line, port):
     """
-    Check if the line matches the format (positive or negative floating point number), (positive or negative floating point number)
-    line: Line to check if it's valid serial data we want to save.
-    port: 'COM9' for example
+    Check if the line matches the format (positive or negative floating point number), (positive or negative floating point number) \n
+    Inputs:
+        line: Line to check if it's valid serial data we want to save.
+        port: 'COM9' for example
+    Ouputs:
+        true if valid, false if not
     """
     cuff_pattern = re.compile(r'^-?\d+(\.\d+)?, -?\d+(\.\d+)?$')
     hammer_pattern = re.compile(r'^-?\d+(\.\d+)?, -?\d+(\.\d+)?, -?\d+(\.\d+)?$')
@@ -140,7 +143,7 @@ def read_from_serial(port, baud_rate, output_file, done_event):
 
 def find_outliers_std(data, threshold=3):
     '''
-    Helper function to set minimum and maximum bounds on data that exclude outliers
+    Helper function to set minimum and maximum bounds on data that exclude outliers \n
     Inputs:
         data: 1D array to analyze
         threshhold: Data outside [threshold] standard deviations will not be included within the minimum, maximum bounds
@@ -167,7 +170,7 @@ def find_outliers_std(data, threshold=3):
 
 def get_reshaped_array_from_arduino_csv(output_files, DATA_LENGTH, use_emg = False):
     '''
-    Reads in Arduino cuff and hammer csvs, to output data in format needed for plot_heat_map
+    Reads in Arduino cuff and hammer csvs, to output data in format needed for plot_heat_map \n
     Inputs:
         output_files: array of the format [path to hammer csv, path to cuff csv]
         DATA_LENGTH: How many data points saved per recieved pulse in the cuff Arduino
@@ -216,7 +219,7 @@ def get_reshaped_array_from_arduino_csv(output_files, DATA_LENGTH, use_emg = Fal
 
 def plot_heat_map(input_files, folder_path = files_folder_path, png_name = "cuff_hammer_emg_combined", stddev = 3, use_emg = False):
     '''
-    Plots hammer hit versus cuff heatmap, and allows user to select an area to search for the maximum intensity in.
+    Plots hammer hit versus cuff heatmap, and allows user to select an area to search for the maximum intensity in. \n
     Inputs:
         input_files: [hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, time_ticks, NUM_PULSES]
             hammer_times: Hammer times in ms. First col of hammer csv
