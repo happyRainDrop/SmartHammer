@@ -98,8 +98,7 @@ def find_outliers_std(data, threshold=3):
     
     return lower_outliers, upper_outliers, lower_bound, upper_bound
 
-
-def plot_heat_map(output_files, DATA_LENGTH, png_name = "cuff_hammer_emg_combined", use_emg = False):
+def get_reshaped_array_from_arduino_csv(output_files, DATA_LENGTH, use_emg = False):
     hammer_csv = pd.read_csv(output_files[0], header=None).to_numpy()
     cuff_csv = pd.read_csv(output_files[1], header=None).to_numpy()
 
@@ -129,7 +128,20 @@ def plot_heat_map(output_files, DATA_LENGTH, png_name = "cuff_hammer_emg_combine
         cuff_times_reshaped.append(cuff_pulse_times)
         cuff_recieved_reshaped.append(cuff_pulse_data)
         time_ticks.append(round(cuff_pulse_times[0], 2))
+
+    return [hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, time_ticks, NUM_PULSES]
+
+def plot_heat_map(input_files, png_name = "cuff_hammer_emg_combined", stddev = 3, use_emg = False):
     
+    # Retrieve the data we need for the heat map
+    hammer_times = input_files[0]
+    hammer_recieved = input_files[1]
+    emg_recieved = input_files[2]
+    cuff_times_reshaped = input_files[3]
+    cuff_recieved_reshaped = input_files[4]
+    time_ticks = input_files[5]
+    NUM_PULSES = input_files[6]
+
     # Plot using GridSpec
     fig = plt.figure(figsize=(6, 8))
     gs = gridspec.GridSpec(3, 1, height_ratios=[1, 1, 0.05])
@@ -148,7 +160,7 @@ def plot_heat_map(output_files, DATA_LENGTH, png_name = "cuff_hammer_emg_combine
     # Cuff signal subplot
     ax2 = plt.subplot(gs[1])
     cuff_vals_for_heatmap = np.asarray(cuff_recieved_reshaped) - np.asarray(cuff_recieved_reshaped)[0, :]
-    lower_outliers, upper_outliers, lower_lim_imshow, upper_lim_imshow = find_outliers_std(cuff_vals_for_heatmap)
+    lower_outliers, upper_outliers, lower_lim_imshow, upper_lim_imshow = find_outliers_std(cuff_vals_for_heatmap, stddev)
     im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim_imshow)
     ax2.set_title('Circuit envelope: \nPulse height vs time normalize to start of pulse, all pulses overlayed')
     ax2.set_ylabel('Array index within pulse')
@@ -195,8 +207,10 @@ def plot_heat_map(output_files, DATA_LENGTH, png_name = "cuff_hammer_emg_combine
         print(f'Manual select found: Maximum muscle contraction found at {time_of_max} ms after hammer hit')
         
         # Redraw the figure to update the annotation and marker
-        fig.savefig(files_folder_path + png_name + '.png')
+        str_name = files_folder_path + png_name + '.png'
+        fig.savefig(str_name)
         fig.canvas.draw_idle()
+        print(f"Saving to: {str_name}")
 
     # Create the RectangleSelector
     rect_selector = RectangleSelector(ax2, on_select, useblit=True,
@@ -216,13 +230,14 @@ def plot_heat_map(output_files, DATA_LENGTH, png_name = "cuff_hammer_emg_combine
     reflex_time = 0
     max_amplitude_heat_map = 0
     for r in range(NUM_PULSES):
-        for c in range(min_reflex_index_within_pulse, DATA_LENGTH):
+        for c in range(min_reflex_index_within_pulse, len(cuff_recieved_reshaped[r])):
             amplitude_diff = cuff_recieved_reshaped[r][c] - cuff_recieved_reshaped[0][c]
             if (cuff_times_reshaped[r][c] < min_reflex_time or cuff_times_reshaped[r][c] > max_reflex_time): continue
             if np.abs(amplitude_diff) > max_amplitude_heat_map and amplitude_diff > lower_lim_imshow and amplitude_diff < upper_lim_imshow:
                 max_amplitude_heat_map = np.abs(amplitude_diff)
                 reflex_time = cuff_times_reshaped[r][c]
     print(f"Auto-detect found: Maximum muscle contraction found at {reflex_time} ms after hammer hit.")
+
 
 
 if __name__ == "__main__":
@@ -261,4 +276,5 @@ if __name__ == "__main__":
 
     test_output_files = ["src/app_v1/misc_trials/good_sina_trials/hammer_t1_sina_redo.csv", 
                          "src/app_v1/misc_trials/good_sina_trials/cuff_t1_sina_redo.csv"]
-    plot_heat_map(test_output_files, DATA_LENGTH, str(args.filename_suffix))
+    data_arrays = get_reshaped_array_from_arduino_csv(output_files, DATA_LENGTH)
+    plot_heat_map(data_arrays, file_name)
