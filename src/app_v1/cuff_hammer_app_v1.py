@@ -20,6 +20,7 @@ baud_rate = 115200
 DATA_LENGTH =  200 # From cuff arduino
 files_folder_path = 'src/app_v1/'
 file_name = 'test'
+read_live_data = False
 
 ##################################################################################################################################
 
@@ -99,6 +100,22 @@ def find_outliers_std(data, threshold=3):
     return lower_outliers, upper_outliers, lower_bound, upper_bound
 
 def get_reshaped_array_from_arduino_csv(output_files, DATA_LENGTH, use_emg = False):
+    '''
+    Reads in Arduino cuff and hammer csvs, to output data in format needed for plot_heat_map
+    Inputs:
+        output_files: array of the format [path to hammer csv, path to cuff csv]
+        DATA_LENGTH: How many data points saved per recieved pulse in the cuff Arduino
+        use_emg: Consider emg data (third col of hammer csv)
+    Outputs:
+        [hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, time_ticks, NUM_PULSES]
+        hammer_times: Hammer times in ms. First col of hammer csv
+        hammer_recieved: Hammer Arduino recieved voltages (V). Second col of hammer csv
+        emg_recieved: EMG data in voltages (V), empty array if use_emg = False
+        cuff_times_reshaped:[[times of recieved pulse 1], [times of recieved pulse 2],...]
+        cuff_recieved_reshaped: [[voltages of recieved pulse 1], [voltages of recieved pulse 2],...]
+        time_ticks: Used on heat maps -- the starting time of each pulse.
+        NUM_PULSES: Number of recieved pulses detected in the cuff data. 
+    '''
     hammer_csv = pd.read_csv(output_files[0], header=None).to_numpy()
     cuff_csv = pd.read_csv(output_files[1], header=None).to_numpy()
 
@@ -131,7 +148,25 @@ def get_reshaped_array_from_arduino_csv(output_files, DATA_LENGTH, use_emg = Fal
 
     return [hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, time_ticks, NUM_PULSES]
 
-def plot_heat_map(input_files, png_name = "cuff_hammer_emg_combined", stddev = 3, use_emg = False):
+def plot_heat_map(input_files, folder_path = files_folder_path, png_name = "cuff_hammer_emg_combined", stddev = 3, use_emg = False):
+    '''
+    Plots hammer hit versus cuff heatmap, and allows user to select an area to search for the maximum intensity in.
+    Inputs:
+        input_files: [hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, time_ticks, NUM_PULSES]
+            hammer_times: Hammer times in ms. First col of hammer csv
+            hammer_recieved: Hammer Arduino recieved voltages (V). Second col of hammer csv
+            emg_recieved: EMG data in voltages (V), empty array if use_emg = False
+            cuff_times_reshaped:[[times of recieved pulse 1], [times of recieved pulse 2],...]
+            cuff_recieved_reshaped: [[voltages of recieved pulse 1], [voltages of recieved pulse 2],...]
+            time_ticks: Used on heat maps -- the starting time of each pulse.
+            NUM_PULSES: Number of recieved pulses detected in the cuff data.
+        folder_path: location to save png in 
+        png_name: name of png that is saved 
+        stddev: Sets limit of color map. higher stddev = less outliers unconsidered
+        use_emg: True to plot EMG data on top of hammer data, false otherwise
+    Outputs:
+        Saves heatmap to folder_path + png_name + '.png'
+    '''
     
     # Retrieve the data we need for the heat map
     hammer_times = input_files[0]
@@ -207,10 +242,7 @@ def plot_heat_map(input_files, png_name = "cuff_hammer_emg_combined", stddev = 3
         print(f'Manual select found: Maximum muscle contraction found at {time_of_max} ms after hammer hit')
         
         # Redraw the figure to update the annotation and marker
-        str_name = files_folder_path + png_name + '.png'
-        fig.savefig(str_name)
         fig.canvas.draw_idle()
-        print(f"Saving to: {str_name}")
 
     # Create the RectangleSelector
     rect_selector = RectangleSelector(ax2, on_select, useblit=True,
@@ -221,6 +253,9 @@ def plot_heat_map(input_files, png_name = "cuff_hammer_emg_combined", stddev = 3
     # Save the figure before showing it
     plt.subplots_adjust(hspace=1)
     plt.show()
+    str_name = folder_path + png_name + '.png'
+    fig.savefig(str_name)
+    print(f"Saving to: {str_name}")
     plt.close(fig)
     
     # Return time of reflex
@@ -258,23 +293,24 @@ if __name__ == "__main__":
                     files_folder_path+'cuff_'+file_name+'.csv']
 
     
-    #''' 
-    # Threading to read both serial ports simultaneously.
-    done_events = [threading.Event() for _ in ports]
-    threads = []
-    for port, output_file, done_event in zip(ports, output_files, done_events):
-        thread = threading.Thread(target=read_from_serial, args=(port, baud_rate, output_file, done_event))
-        threads.append(thread)
-        thread.start()
-    # Wait for both threads to complete
-    for done_event in done_events:
-        done_event.wait()
-    # '''
+    if (read_live_data):
+        # Threading to read both serial ports simultaneously.
+        done_events = [threading.Event() for _ in ports]
+        threads = []
+        for port, output_file, done_event in zip(ports, output_files, done_events):
+            thread = threading.Thread(target=read_from_serial, args=(port, baud_rate, output_file, done_event))
+            threads.append(thread)
+            thread.start()
+        # Wait for both threads to complete
+        for done_event in done_events:
+            done_event.wait()
 
-    # Proceed to the next step of analyzing both CSVs
-    print("Both threads are done. Proceeding to analyze the CSV files.")
+        # Proceed to the next step of analyzing both CSVs
+        print("Both threads are done. Proceeding to analyze the CSV files.")
 
     test_output_files = ["src/app_v1/misc_trials/good_sina_trials/hammer_t1_sina_redo.csv", 
                          "src/app_v1/misc_trials/good_sina_trials/cuff_t1_sina_redo.csv"]
+    
     data_arrays = get_reshaped_array_from_arduino_csv(output_files, DATA_LENGTH)
+    print(f"Reading {output_files[0]} and {output_files[1]}")
     plot_heat_map(data_arrays, file_name)
