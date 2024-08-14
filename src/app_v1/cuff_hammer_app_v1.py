@@ -265,7 +265,7 @@ def plot_heat_map(input_files, folder_path = files_folder_path, png_name = "cuff
 
     # Cuff signal subplot
     ax2 = plt.subplot(gs[1])
-    cuff_vals_for_heatmap = np.asarray(cuff_recieved_reshaped) - np.asarray(cuff_recieved_reshaped)[0, :]
+    cuff_vals_for_heatmap = np.asarray(cuff_recieved_reshaped)# - np.asarray(cuff_recieved_reshaped)[0, :]
     lower_outliers, upper_outliers, lower_lim_imshow, upper_lim_imshow = find_outliers_std(cuff_vals_for_heatmap, stddev)
     im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim_imshow)
     ax2.set_title('Circuit envelope: \nPulse height vs time normalize to start of pulse, all pulses overlayed')
