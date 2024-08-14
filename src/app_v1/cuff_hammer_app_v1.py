@@ -220,7 +220,8 @@ def get_reshaped_array_from_arduino_csv(output_files, DATA_LENGTH, use_emg = Fal
 def plot_heat_map(input_files, folder_path = files_folder_path, png_name = "cuff_hammer_emg_combined", stddev = 3, use_emg = False):
     '''
     Plots hammer hit versus cuff heatmap, and allows user to select an area to search for the maximum intensity in. \n
-    Inputs:
+
+    Inputs: \n
         input_files: [hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, time_ticks, NUM_PULSES]
             hammer_times: Hammer times in ms. First col of hammer csv
             hammer_recieved: Hammer Arduino recieved voltages (V). Second col of hammer csv
@@ -233,7 +234,8 @@ def plot_heat_map(input_files, folder_path = files_folder_path, png_name = "cuff
         png_name: name of png that is saved 
         stddev: Sets limit of color map. higher stddev = less outliers unconsidered
         use_emg: True to plot EMG data on top of hammer data, false otherwise
-    Outputs:
+
+    Outputs: \n
         Saves heatmap to folder_path + png_name + '.png'
     '''
     
