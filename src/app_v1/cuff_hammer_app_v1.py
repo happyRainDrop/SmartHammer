@@ -217,7 +217,7 @@ def get_reshaped_array_from_arduino_csv(output_files, DATA_LENGTH, use_emg = Fal
 
     return [hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, time_ticks, NUM_PULSES]
 
-def plot_heat_map(input_files, folder_path = files_folder_path, png_name = "cuff_hammer_emg_combined", stddev = 3, use_emg = False):
+def plot_heat_map(input_files, folder_path = files_folder_path, png_name = "cuff_hammer_emg_combined", stddev = 3, use_emg = False, normalize_to_initial = True):
     '''
     Plots hammer hit versus cuff heatmap, and allows user to select an area to search for the maximum intensity in. \n
 
@@ -265,7 +265,9 @@ def plot_heat_map(input_files, folder_path = files_folder_path, png_name = "cuff
 
     # Cuff signal subplot
     ax2 = plt.subplot(gs[1])
-    cuff_vals_for_heatmap = np.asarray(cuff_recieved_reshaped)# - np.asarray(cuff_recieved_reshaped)[0, :]
+    cuff_vals_for_heatmap = np.asarray(cuff_recieved_reshaped)
+    if (normalize_to_initial): 
+        cuff_vals_for_heatmap = np.asarray(cuff_recieved_reshaped) - np.asarray(cuff_recieved_reshaped)[0, :]
     lower_outliers, upper_outliers, lower_lim_imshow, upper_lim_imshow = find_outliers_std(cuff_vals_for_heatmap, stddev)
     im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim_imshow)
     ax2.set_title('Circuit envelope: \nPulse height vs time normalize to start of pulse, all pulses overlayed')
