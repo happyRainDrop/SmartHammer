@@ -55,7 +55,7 @@ from matplotlib.widgets import RectangleSelector
 ports = ['COM9', 'COM20']  # hammer port, cuff port
 baud_rate = 115200
 DATA_LENGTH =  200 # From cuff arduino
-read_live_data = False
+read_live_data = True
 
 # Default folder path and file name used in testing mode
 files_folder_path = 'src/app_v1/'
@@ -386,4 +386,4 @@ if __name__ == "__main__":
     
     data_arrays = get_reshaped_array_from_arduino_csv(output_files, DATA_LENGTH)
     print(f"Reading {output_files[0]} and {output_files[1]}")
-    plot_heat_map(data_arrays, file_name)
+    plot_heat_map(data_arrays, png_name=file_name, folder_path=files_folder_path)
