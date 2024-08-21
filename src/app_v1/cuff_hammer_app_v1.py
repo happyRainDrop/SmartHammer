@@ -358,10 +358,10 @@ if __name__ == "__main__":
                     epilog='Text at the bottom of help')
 
     parser.add_argument('--filename_suffix', type=str, help = 'appended to name of hammer,cuff csvs (do not include .csv postfix)') 
-    parser.add_argument('--file_path', type=str, help='to change the default path (can insert full or relative path)', nargs='?') 
+    parser.add_argument('--folder_path', type=str, help='to change the default path (can insert full or relative path)', nargs='?') 
 
     args = parser.parse_args()
-    if args.file_path is not None: files_folder_path = args.file_path
+    if args.folder_path is not None: files_folder_path = args.folder_path
     if args.filename_suffix is not None: file_name = str(args.filename_suffix)
 
     output_files = [files_folder_path+'hammer_'+file_name+'.csv', 
