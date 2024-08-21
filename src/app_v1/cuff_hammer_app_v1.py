@@ -56,6 +56,8 @@ ports = ['COM9', 'COM20']  # hammer port, cuff port
 baud_rate = 115200
 DATA_LENGTH =  200 # From cuff arduino
 read_live_data = True
+demo_mode = False       # Use it to pretend to generate a heat map on the spot, but
+                        # it actually just pulls up Sina's old reflex :p
 
 # Default folder path and file name used in testing mode
 files_folder_path = 'src/app_v1/'
@@ -381,9 +383,11 @@ if __name__ == "__main__":
         # Proceed to the next step of analyzing both CSVs
         print("Both threads are done. Proceeding to analyze the CSV files.")
 
-    test_output_files = ["src/app_v1/misc_trials/good_sina_trials/hammer_t1_sina_redo.csv", 
-                         "src/app_v1/misc_trials/good_sina_trials/cuff_t1_sina_redo.csv"]
+    test_output_files = ["src/app_v1/data_from_experiments/misc_trials/good_sina_trials/hammer_t1_sina_redo.csv", 
+                         "src/app_v1/data_from_experiments/misc_trials/good_sina_trials/cuff_t1_sina_redo.csv"]
     
+    if demo_mode: output_files = test_output_files
+
     data_arrays = get_reshaped_array_from_arduino_csv(output_files, DATA_LENGTH)
     print(f"Reading {output_files[0]} and {output_files[1]}")
     plot_heat_map(data_arrays, png_name=file_name, folder_path=files_folder_path)
