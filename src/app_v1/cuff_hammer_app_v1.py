@@ -1,6 +1,6 @@
 '''
 Name: cuff_hammer_app_v1.py
-Last updated: 8/14/26 by Ruth Berkun
+Last updated: 8/21/26 by Ruth Berkun
 
 Table of contents:
     Functions to parse Arduino serial data:
@@ -25,6 +25,47 @@ Instructions for use:
             Currently 115200 and 200 respectively.
                 
             Run python cuff_hammer_app_v1.py in terminal.
+            1. Do NOT hit the hammer until the terminal prints
+                Connected to [hammer port] at rate [baud rate].
+                Connected to [cuff port] at rate [baud rate].
+
+                It shoulnd't print anything after that if you're not hitting the hammer.
+                If it prints that if found invalid data, you should probably restart the program
+                If it prints that it its starting to save data to CSV, it triggered by accident. 
+                Close the terminal and restart the program.
+
+            2. Hit the hammer on the table.
+                It should now print something like
+                COM20: Starting to save data to CSV, found line -4.910000, 0.074 is valid
+                COM9: Starting to save data to CSV, found line 0.00, 0.57, 0.85 is valid
+
+                If it's not printing anything, the hammer didn't trigger, try hitting it harder.
+
+            3. Wait until prints "Both threads are done. Proceeding to analyze the CSV files."
+            On the picture that pops up, click and drag a rectangle of the region you want to find the max
+            intensity in.
+            Close the image, and the program will complete, and save to the location you specified
+
+            4. Example of what is printed to terminal on a successful run:
+                PS C:\Users\tealw\Documents\PlatformIO\Projects\SmartHammer-1> 
+                & C:/Users/tealw/AppData/Local/Programs/Python/Python310/python.exe 
+                c:/Users/tealw/Documents/PlatformIO/Projects/SmartHammer-1/src/app_v1/cuff_hammer_app_v1.py 
+                --filename_suffix ruth_box_test_trial_11 
+                --folder_path src/app_v1/data_from_experiments/misc_trials/ruth_new_box_test_trials/Arduino/
+                Connected to COM9 at 115200 baud rate.
+                Connected to COM20 at 115200 baud rate.
+                COM20: Starting to save data to CSV, found line -4.910000, 0.074 is valid
+                COM9: Starting to save data to CSV, found line 0.00, 0.57, 0.85 is valid
+                COM9: Stopping data saving to CSV
+                Serial connection closed on COM9.
+                COM20: Stopping data saving to CSV
+                Serial connection closed on COM20.
+                Both threads are done. Proceeding to analyze the CSV files.
+                78 recieved pulses found.
+                Reading src/app_v1/data_from_experiments/misc_trials/ruth_new_box_test_trials/Arduino/hammer_ruth_box_test_trial_11.csv and src/app_v1/data_from_experiments/misc_trials/ruth_new_box_test_trials/Arduino/cuff_ruth_box_test_trial_11.csv
+                Saving to: src/app_v1/data_from_experiments/misc_trials/ruth_new_box_test_trials/Arduino/ruth_box_test_trial_11.png
+                Auto-detect found: Maximum muscle contraction found at 33.598953 ms after hammer hit.
+            
         To specify folder path and or file name to save csv and png files under: 
             Run python cuff_hammer_app_v1.py --filename_suffix DESIRED_NAME --folder_path DESIRED_FOLDER_PATH
 
