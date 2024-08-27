@@ -1,20 +1,18 @@
-import ctypes
 import numpy as np
 import matplotlib.pyplot as plt
 import time as time
-import os
-import csv
 from scipy.signal import butter, sosfilt
 from scipy.signal import hilbert
 import pandas as pd
 from scipy.signal import argrelextrema
 from scipy.signal import medfilt
 from scipy.signal import butter, lfilter
-from scipy.signal import freqs
 from scipy.signal import find_peaks
 import matplotlib.gridspec as gridspec
 from matplotlib.widgets import RectangleSelector
 from matplotlib.animation import FuncAnimation, PillowWriter, FFMpegWriter
+from scipy.ndimage import gaussian_filter1d
+
 
 ####################################################################################################### Helper fns
 
@@ -471,7 +469,7 @@ def get_gif(all_csv_data, col_indexes, save_as_mp4 = True, plot_circuit_envelope
     print(f"Saved at: {save_place}")
     plt.show()
 
-def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env = True):
+def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env = True, folder="", title="fig"):
     times_arr = []
     lines_arr = []
     i = 0
@@ -510,16 +508,41 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
                                  np.asarray(lines_arr[:min(len(these_lines), len(lines_arr))]))
         i+=1
     
+    variance_signal = np.round(np.var(lines_arr, axis=0), 2)
+    save_path = folder + "/" + title + "_individual_variance_"+str(variance_signal)+".png"
+    plt.savefig(save_path)
+    print("Saving to "+save_path)
+    plt.ylim(20, 40)
     plt.show()
 
-    plt.plot(times_arr[0][:min(len(times_arr[0]), len(lines_arr))], 
-             (lines_arr/(1.0*len(times_arr)))[:min(len(times_arr[0]), len(lines_arr))])
-    plt.ylim(0, 50)
+    # To account for different lengths
+    times_cut = times_arr[0][:min(len(times_arr[0]), len(lines_arr))]
+    lines_cut =  (lines_arr/(1.0*len(times_arr)))[:min(len(times_arr[0]), len(lines_arr))] 
+    lines_cut = gaussian_filter1d(lines_cut, sigma=1)
+    peaks, _ = find_peaks(lines_cut, distance=20)
+    valleys, _ = find_peaks(-1*lines_cut, distance=20)
+
+    # Plot
+    plt.plot(times_cut, lines_cut)
+    plt.ylim(20, 40)
     plt.xlabel("Time since hammer hit (ms)")
     plt.ylabel("Voltage (mV)")
     plt.title("Integral of each pulse over time")
-    plt.show()
 
+    # Mark and label peaks (maxima)
+    plt.plot(times_cut[peaks], lines_cut[peaks], 'ro', label='Maxima')
+    for i in peaks:
+        plt.text(times_cut[i], lines_cut[i], f'Max {times_cut[i]:.2f} ms,\n {lines_cut[i]:.2f} mV', fontsize=6, ha='right', va='top')
+
+    # Mark and label valleys (minima)
+    plt.plot(times_cut[valleys], lines_cut[valleys], 'bo', label='Minima')
+    for i in valleys:
+        plt.text(times_cut[i], lines_cut[i], f'Min {times_cut[i]:.2f} ms,\n {lines_cut[i]:.2f} mV', fontsize=6, ha='left', va='bottom')
+        
+    save_path = folder + "/" + title + "_average.png"
+    plt.savefig(save_path)
+    print("Saving to "+save_path)
+    plt.show()
         
 
 
@@ -529,22 +552,25 @@ if __name__ == "__main__":
     legends = ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9", "t10"]
     col_order = [0, 2, 3, 1, 1, 1]  # time, recieved, hammer, square
 
-    file_names = ["src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial1.txt", 
-                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial2.txt",
-                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial3.txt",
-                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial4.txt",
-                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial5.txt",
-                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial6.txt", 
-                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial7.txt",
-                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial8.txt",
-                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial9.txt",
-                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial10.txt"]
+    file_names = ["src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial1.txt", 
+                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial2.txt",
+                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial3.txt",
+                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial4.txt",
+                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial5.txt",
+                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial6.txt", 
+                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial7.txt",
+                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial8.txt",
+                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial9.txt",
+                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial10.txt"]
 
     input_files_across_trials = []
+    file_folder_name = ""
+    this_file_name = "sophie"
     for file_name in file_names:
         file_folder_name = file_name[:file_name.rindex("/")]
         specific_file_name = file_name[file_name.rindex("/")+1:file_name.rindex(".")]
         t1_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+").to_numpy()
         input_files_across_trials.append(get_reshaped_arrays(t1_csv, col_order))
-    plot_2d(input_files_across_trials, legends)
+    print(file_folder_name)
+    plot_2d(input_files_across_trials, legends, folder=file_folder_name, title=this_file_name)
         
