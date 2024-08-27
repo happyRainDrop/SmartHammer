@@ -564,13 +564,22 @@ if __name__ == "__main__":
                   "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial10.txt"]
 
     input_files_across_trials = []
+    total_thing = []
     file_folder_name = ""
     this_file_name = "sophie"
     for file_name in file_names:
         file_folder_name = file_name[:file_name.rindex("/")]
         specific_file_name = file_name[file_name.rindex("/")+1:file_name.rindex(".")]
         t1_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+").to_numpy()
-        input_files_across_trials.append(get_reshaped_arrays(t1_csv, col_order))
+        t1_arr = get_reshaped_arrays(t1_csv, col_order)
+        if len(total_thing)==0: total_thing = np.asarray(t1_arr[5])
+        else: total_thing = np.add(total_thing[:min(len(total_thing), len(t1_arr[5]))], 
+                                   np.asarray(t1_arr[5][:min(len(total_thing), len(t1_arr[5]))]))
+
+        input_files_across_trials.append(t1_arr)
     print(file_folder_name)
-    plot_2d(input_files_across_trials, legends, folder=file_folder_name, title=this_file_name)
+    # plot_2d(input_files_across_trials, legends, folder=file_folder_name, title=this_file_name)
+
+    i = input_files_across_trials[0]
+    plot_heat_map([i[0], i[1], i[2], i[3], i[4], total_thing/len(file_names), i[6], i[7], i[8]])
         
