@@ -14,15 +14,9 @@ from scipy.signal import freqs
 from scipy.signal import find_peaks
 import matplotlib.gridspec as gridspec
 from matplotlib.widgets import RectangleSelector
+from matplotlib.animation import FuncAnimation, PillowWriter, FFMpegWriter
 
-all_csv_data = pd.read_csv("src/logs/exp_6_no_remove_cuff/Pico_data/exp_6_rachel_trial_circuit_2.txt",skiprows=1, sep='\s+').to_numpy()
-
-csv_times = all_csv_data[:,0]
-csv_square_pulses = all_csv_data[:,1]
-csv_recieved_pulses = all_csv_data[:,2]
-csv_circuit_envelope =  all_csv_data[:,3]
-csv_hammer = all_csv_data[:,4]
-####################################################################################################### Envelope
+####################################################################################################### Helper fns
 
 def find_maxima_envelope(signal, sampling_rate, approx_frequency):
     """
@@ -61,214 +55,27 @@ def butter_lowpass_filter(data, cutOff, fs, order=4):
     y = lfilter(b, a, data)
     return y
 
-use_raw_envelope = False
-keep_raw_data = True
+def get_filtered_pulses(data, Sampling_frequency, use_raw_envelope = False):
+    if (use_raw_envelope):
+        kernel_size = 3
+        return medfilt(data, kernel_size)
+    else:
+        Filter_lowcut =40000
+        Filter_highcut =60000
+        Filter_order = 4
+        # print(f"Sampling frequency: {Sampling_frequency}")
+        sos = butter(Filter_order, [Filter_lowcut, Filter_highcut], btype='bandpass', fs=Sampling_frequency, output='sos')
+        return np.apply_along_axis(lambda x: sosfilt(sos, x), axis=0, arr = data)
 
-filtered_recieved_pulses = []
-calculated_envelope = []
+def get_envelope(data, use_raw_envelope = False):
+    if use_raw_envelope:
+        lowest_freq_of_recieved_sig = 20000 # needs to be much lower than 52 kHz -- this is what determines the distance between points on the envelope
+        osc_sampling_freq = 200000
+        calculated_envelope = find_maxima_envelope(data, osc_sampling_freq, lowest_freq_of_recieved_sig)
+    else:
+        calculated_envelope = np.abs(hilbert(data, axis=0))
 
-Filter_lowcut =40000
-Filter_highcut =60000
-Filter_order = 4
-Sampling_frequency=1000/(all_csv_data[1,0]-all_csv_data[0,0]) # in Hz, since time is in ms
-print(f"Sampling frequency: {Sampling_frequency}")
-sos = butter(Filter_order, [Filter_lowcut, Filter_highcut], btype='bandpass', fs=Sampling_frequency, output='sos')
-
-if (use_raw_envelope):
-    kernel_size = 3
-    window_length = 30
-    polyorder = 10
-    filtered_recieved_pulses = medfilt(csv_recieved_pulses, kernel_size)
-    # filtered_recieved_pulses = savgol_filter(csv_recieved_pulses, window_length, polyorder)
-
-    lowest_freq_of_recieved_sig = 20000 # needs to be much lower than 52 kHz -- this is what determines the distance between points on the envelope
-    osc_sampling_freq = 200000
-    calculated_envelope = find_maxima_envelope(filtered_recieved_pulses, osc_sampling_freq, lowest_freq_of_recieved_sig)
-
-else: 
-    filtered_recieved_pulses = np.apply_along_axis(lambda x: sosfilt(sos, x), axis=0, arr = csv_recieved_pulses)
-    calculated_envelope = np.abs(hilbert(filtered_recieved_pulses, axis=0))
-
-if (keep_raw_data): filtered_recieved_pulses = csv_recieved_pulses
-
-################################ New reshaping code to account for big changes in periods btw pulses
-NUM_PULSES = 0
-
-### Find the start of each pulse
-total_start_indicies =  []
-
-i = 0
-r = 0
-tr = -7
-max_pulse_length_in_indicies = 0
-while i < (len(csv_square_pulses) - 1):
-    if (csv_square_pulses[i] < tr and csv_square_pulses[i+1] >= tr):
-        # print(f"{r}, {i}, {csv_square_pulses[i]}, {csv_square_pulses[i+1]}")
-        total_start_indicies.append(i)
-        if (r > 0):
-            max_pulse_length_in_indicies = max(max_pulse_length_in_indicies, total_start_indicies[r] - total_start_indicies[r-1])
-        r += 1
-        i += 500
-    i+=1
-print(max_pulse_length_in_indicies)
-NUM_PULSES = r
-
-######## Reshaped arrays . shorter pulses padded with the last data point.
-times_reshaped = np.zeros((NUM_PULSES, max_pulse_length_in_indicies))
-square_pulses_reshaped = np.zeros((NUM_PULSES, max_pulse_length_in_indicies))
-calculated_envelope_reshaped = np.zeros((NUM_PULSES, max_pulse_length_in_indicies))
-circuit_envelope_reshaped = np.zeros((NUM_PULSES, max_pulse_length_in_indicies))
-recieved_pulses_reshaped = np.zeros((NUM_PULSES, max_pulse_length_in_indicies))
-
-r = 0
-for s in range(len(total_start_indicies)):
-    this_start = total_start_indicies[s]
-    next_start = len(csv_times) - 1
-    if (s + 1 < len(total_start_indicies)): next_start = total_start_indicies[s+1]
-
-    for c in range(max_pulse_length_in_indicies):
-
-        if (c + this_start < next_start):
-            times_reshaped[r][c] = csv_times[c + this_start]
-            square_pulses_reshaped[r][c] = csv_square_pulses[c + this_start]
-            calculated_envelope_reshaped[r][c] = calculated_envelope[c + this_start]
-            circuit_envelope_reshaped[r][c] = csv_circuit_envelope[c + this_start]
-            recieved_pulses_reshaped[r][c] = filtered_recieved_pulses[c + this_start]
-        else:
-            times_reshaped[r][c] = csv_times[next_start - 1]
-            square_pulses_reshaped[r][c] = csv_square_pulses[next_start - 1]
-            calculated_envelope_reshaped[r][c] = calculated_envelope[next_start - 1]
-            circuit_envelope_reshaped[r][c] = csv_circuit_envelope[next_start - 1]
-            recieved_pulses_reshaped[r][c] = filtered_recieved_pulses[next_start - 1]
-
-    r += 1
-
-start = np.zeros(NUM_PULSES)
-
-''' 
-# 10 pulses lasts about 200 indexes
-# Sanity check that we are slicing the pulses correctly
-for r in range(NUM_PULSES):
-    fig = plt.figure(figsize =(10, 1))
-    plt.plot(times_reshaped[r], square_pulses_reshaped[r])
-    plt.show()
-# '''
-
-points_per_col = max_pulse_length_in_indicies - 1
-
-square_pulses_reshaped_cut = np.zeros((NUM_PULSES - 1,points_per_col))
-calculated_envelope_reshaped_cut = np.zeros((NUM_PULSES - 1,points_per_col))
-circuit_envelope_reshaped_cut = np.zeros((NUM_PULSES - 1,points_per_col))
-time_ticks = []
-    
-for i in range(NUM_PULSES - 1):
-    # For each pulse, only save certain columns (2000 data points after the start of the pulse burst)
-    square_pulses_reshaped_cut[i,: ] = square_pulses_reshaped[i, start[i].astype(int) : start[i].astype(int) + points_per_col]
-    calculated_envelope_reshaped_cut[i,:] = calculated_envelope_reshaped[i,start[i].astype(int):start[i].astype(int)+points_per_col]
-    circuit_envelope_reshaped_cut[i,:] = circuit_envelope_reshaped[i,start[i].astype(int):start[i].astype(int)+points_per_col]
-    time_ticks.append(round(times_reshaped[i, start[i].astype(int)], 2)) # Start time of each pulse
-
-print("Time ticks: ")
-print(time_ticks)
-
-#################################################################################### Quadrature phase stuff
-
-############################################# Quadrature modulation time! ###########################################
-#####################################################################################################################
-#####################################################################################################################
-
-Filter_lowcut = 1
-Filter_highcut = 40000
-Filter_order = 4
-Sampling_frequency=1000/(all_csv_data[1,0]-all_csv_data[0,0]) # in Hz, since time is in ms
-lowpass_sin_cos_ref = butter(Filter_order, [Filter_lowcut, Filter_highcut], btype='bandpass', fs=Sampling_frequency, output='sos')
-
-
-#################################################################################### Step 1: Find dominant frequency
-
-show_recieved_fft_plot = False
-
-dt = np.mean(np.diff(csv_times))
-fs = 1 / dt  # Sampling frequency
-
-# Compute FFT
-fft_values = np.fft.fft(csv_recieved_pulses)
-fft_frequencies = np.fft.fftfreq(len(csv_recieved_pulses), dt)
-
-# Only take the positive frequencies (and corresponding FFT values)
-positive_frequencies = fft_frequencies[:len(fft_frequencies)//2]
-positive_fft_values = fft_values[:len(fft_values)//2]
-
-peak_frequency_index = np.argmax(np.abs(positive_fft_values))
-peak_frequency = positive_frequencies[peak_frequency_index]
-
-# Plotting
-if show_recieved_fft_plot:
-    plt.figure(figsize=(10, 6))
-    plt.plot(positive_frequencies, np.abs(positive_fft_values))
-    plt.title('FFT of the Signal')
-    plt.xlabel('Frequency (Hz)')
-    plt.ylabel('Magnitude')
-    plt.grid()
-    plt.show()
-
-# convolute with boxcar, length of the 10 transmitted pulses in slow time
-# someday, if need to speed up timing: inv_fft(FFT(box) * FFT(sin_ref))
-
-def ruth_convolution(waveform_1):
-    conv_waveform = np.zeros(len(waveform_1))
-    len_boxcar = 200
-    for i in range(len(waveform_1)):
-        for j in range(len_boxcar):
-            if (i - j < len(waveform_1) and i - j > 0): 
-                conv_waveform[i] += waveform_1[i-j] 
-    return conv_waveform
-
-recieved_freq = peak_frequency
-#################################################################################### Step 2: Mixing 
-
-phase_shift = []
-phase_shift_times = []
-phase_reshaped = []
-for r in range(NUM_PULSES):
-
-    ############################################################### Convert to baseband
-    times_to_conv = times_reshaped[r]
-    sin_ref_fast_time = np.sin(2*np.pi*recieved_freq*(times_to_conv - times_to_conv[0])) * recieved_pulses_reshaped[r]
-    cos_ref_fast_time = np.cos(2*np.pi*recieved_freq*(times_to_conv - times_to_conv[0])) * recieved_pulses_reshaped[r]
-
-    ################################################################ Low pass filter the sine wave
-    sin_ref_fast_time =  np.apply_along_axis(lambda x: sosfilt(lowpass_sin_cos_ref, x), axis=0, arr = sin_ref_fast_time)
-    cos_ref_fast_time = np.apply_along_axis(lambda x: sosfilt(lowpass_sin_cos_ref, x), axis=0, arr = cos_ref_fast_time)
-
-    ################################################################ Convolve with boxcar (Pulse compression)
-    sin_ref_fast_time = ruth_convolution(sin_ref_fast_time)
-    cos_ref_fast_time = ruth_convolution(cos_ref_fast_time)
-
-    ################################################################ Arctangent to get phase shift
-    phase_shift_fast_time = np.arctan2(sin_ref_fast_time, cos_ref_fast_time)
-    # plt.plot(times_to_conv, phase_shift_fast_time)
-    # plt.show()
-
-    ################################################################ Add to 1D array and 2D array
-    phase_reshaped.append(phase_shift_fast_time)
-    for c in range(len(phase_shift_fast_time)):
-        phase_shift.append(phase_shift_fast_time[c])
-        phase_shift_times.append(times_to_conv[c])
-
-plt.title("Phase shift versus slow time")
-plt.xlabel("Time (ms)")
-plt.ylabel("Phase shift (radians)")
-plt.plot(phase_shift_times, phase_shift)
-phase_reshaped = np.array(phase_reshaped)
-
-for c in range(len(phase_reshaped[0])):
-    ################################################################ Filter along range line
-    my_col = phase_reshaped[:,c]
-    phase_reshaped[:,c] = medfilt(my_col, 9)
-
-############################################################################################################################
-# Plots
+    return calculated_envelope
 
 def find_outliers_std(data, threshold=3):
     # Calculate the mean and standard deviation
@@ -285,7 +92,222 @@ def find_outliers_std(data, threshold=3):
     
     return lower_outliers, upper_outliers, lower_bound, upper_bound
 
-def plot_heat_map(input_files, stddev = 3, use_emg = False):
+####################################################################################################### Processing functions
+
+def get_reshaped_arrays(all_csv_data, col_indexes):
+    '''
+    Input:. \n
+        all_csv_data: your csv data as a pandas dataframe
+        col_indexes: Tells us which column in your CSV corresponds to what data collected from oscilloscope!
+        col_indexes = [times_col_index, hammer_index, transmit_col_index, recieve_col_index, circuit_col_index, emg_col_index = 1]
+    Return: hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, circuit_env_reshaped, time_ticks, NUM_PULSES
+    '''
+    use_raw_envelope = False
+    keep_raw_data = True
+
+    csv_times = all_csv_data[:,col_indexes[0]]
+    csv_square_pulses = all_csv_data[:,col_indexes[2]]
+    csv_recieved_pulses = all_csv_data[:,col_indexes[3]]
+    csv_circuit_envelope =  all_csv_data[:,col_indexes[4]]
+    csv_hammer = all_csv_data[:,col_indexes[1]]
+    emg_recieved = all_csv_data[:, col_indexes[5]]
+
+    dt = np.mean(np.diff(csv_times))
+    fs = 1000 / dt  # Sampling frequency
+    ############################################
+
+    hammer_times, hammer_recieved = csv_times, csv_hammer
+
+    filtered_recieved_pulses = get_filtered_pulses(csv_recieved_pulses, fs, use_raw_envelope)
+    calculated_envelope = get_envelope(filtered_recieved_pulses, use_raw_envelope)
+    if (keep_raw_data): filtered_recieved_pulses = csv_recieved_pulses
+
+    NUM_PULSES = 0
+
+    #####################################################  get reshaping scheme from transmit pulse
+    total_start_indicies =  []
+    i = 0
+    r = 0
+    tr = -7
+    max_pulse_length_in_indicies = 0
+    while i < (len(csv_square_pulses) - 1):
+        if (csv_square_pulses[i] < tr and csv_square_pulses[i+1] >= tr):
+            # print(f"{r}, {i}, {csv_square_pulses[i]}, {csv_square_pulses[i+1]}")
+            total_start_indicies.append(i)
+            if (r > 0):
+                max_pulse_length_in_indicies = max(max_pulse_length_in_indicies, total_start_indicies[r] - total_start_indicies[r-1])
+            r += 1
+            i += 500
+        i+=1
+    # print(max_pulse_length_in_indicies)
+    NUM_PULSES = r
+
+    #################################### Reshaped arrays . shorter pulses padded with the last data point.
+    times_reshaped = np.zeros((NUM_PULSES, max_pulse_length_in_indicies))
+    square_pulses_reshaped = np.zeros((NUM_PULSES, max_pulse_length_in_indicies))
+    calculated_envelope_reshaped = np.zeros((NUM_PULSES, max_pulse_length_in_indicies))
+    circuit_envelope_reshaped = np.zeros((NUM_PULSES, max_pulse_length_in_indicies))
+    recieved_pulses_reshaped = np.zeros((NUM_PULSES, max_pulse_length_in_indicies))
+
+    r = 0
+    for s in range(len(total_start_indicies)):
+        this_start = total_start_indicies[s]
+        next_start = len(csv_times) - 1
+        if (s + 1 < len(total_start_indicies)): next_start = total_start_indicies[s+1]
+
+        for c in range(max_pulse_length_in_indicies):
+
+            if (c + this_start < next_start):
+                times_reshaped[r][c] = csv_times[c + this_start]
+                square_pulses_reshaped[r][c] = csv_square_pulses[c + this_start]
+                calculated_envelope_reshaped[r][c] = calculated_envelope[c + this_start]
+                circuit_envelope_reshaped[r][c] = csv_circuit_envelope[c + this_start]
+                recieved_pulses_reshaped[r][c] = filtered_recieved_pulses[c + this_start]
+            else:
+                times_reshaped[r][c] = csv_times[next_start - 1]
+                square_pulses_reshaped[r][c] = csv_square_pulses[next_start - 1]
+                calculated_envelope_reshaped[r][c] = calculated_envelope[next_start - 1]
+                circuit_envelope_reshaped[r][c] = csv_circuit_envelope[next_start - 1]
+                recieved_pulses_reshaped[r][c] = filtered_recieved_pulses[next_start - 1]
+
+        r += 1
+
+    start = np.zeros(NUM_PULSES)
+
+    ''' 
+    # 10 pulses lasts about 200 indexes
+    # Sanity check that we are slicing the pulses correctly
+    for r in range(NUM_PULSES):
+        fig = plt.figure(figsize =(10, 1))
+        plt.plot(times_reshaped[r], square_pulses_reshaped[r])
+        plt.show()
+    # '''
+
+    points_per_col = max_pulse_length_in_indicies - 1
+    ########################################################################## Get time ticks
+    time_ticks = []
+        
+    for i in range(NUM_PULSES - 1):
+        time_ticks.append(round(times_reshaped[i, start[i].astype(int)], 2)) # Start time of each pulse
+
+    #print("Time ticks: ")
+    #print(time_ticks)
+
+    return hammer_times, hammer_recieved, emg_recieved, times_reshaped, recieved_pulses_reshaped, circuit_envelope_reshaped, calculated_envelope_reshaped, time_ticks, NUM_PULSES
+
+def get_phase_arrays(all_csv_data, col_indexes):
+    #################################################################################### Quadrature phase stuff
+    ############################################# Quadrature modulation time! ###########################################
+    #####################################################################################################################
+    #####################################################################################################################
+
+    hammer_times, hammer_recieved, emg_recieved, times_reshaped, recieved_pulses_reshaped, circuit_envelope_reshaped, calculated_envelope_reshaped, time_ticks, NUM_PULSES = get_reshaped_arrays(all_csv_data, col_indexes)
+    csv_times = all_csv_data[:,col_indexes[0]]
+    csv_square_pulses = all_csv_data[:,col_indexes[2]]
+    csv_recieved_pulses = all_csv_data[:,col_indexes[3]]
+    csv_circuit_envelope =  all_csv_data[:,col_indexes[4]]
+    csv_hammer = all_csv_data[:,col_indexes[1]]
+    emg_recieved = all_csv_data[:, col_indexes[5]]
+
+    Filter_lowcut = 1
+    Filter_highcut = 40000
+    Filter_order = 4
+    Sampling_frequency=1000/(csv_times[1]-csv_times[0]) # in Hz, since time is in ms
+    lowpass_sin_cos_ref = butter(Filter_order, [Filter_lowcut, Filter_highcut], btype='bandpass', fs=Sampling_frequency, output='sos')
+
+
+    #################################################################################### Step 1: Find dominant frequency
+
+    show_recieved_fft_plot = False
+
+    dt = np.mean(np.diff(csv_times))
+    fs = 1000 / dt  # Sampling frequency
+
+    # Compute FFT
+    fft_values = np.fft.fft(csv_recieved_pulses)
+    fft_frequencies = np.fft.fftfreq(len(csv_recieved_pulses), dt)
+
+    # Only take the positive frequencies (and corresponding FFT values)
+    positive_frequencies = fft_frequencies[:len(fft_frequencies)//2]
+    positive_fft_values = fft_values[:len(fft_values)//2]
+
+    peak_frequency_index = np.argmax(np.abs(positive_fft_values))
+    peak_frequency = positive_frequencies[peak_frequency_index]
+
+    # Plotting
+    if show_recieved_fft_plot:
+        plt.figure(figsize=(10, 6))
+        plt.plot(positive_frequencies, np.abs(positive_fft_values))
+        plt.title('FFT of the Signal')
+        plt.xlabel('Frequency (Hz)')
+        plt.ylabel('Magnitude')
+        plt.grid()
+        plt.show()
+
+    # convolute with boxcar, length of the 10 transmitted pulses in slow time
+    # someday, if need to speed up timing: inv_fft(FFT(box) * FFT(sin_ref))
+
+    def ruth_convolution(waveform_1):
+        conv_waveform = np.zeros(len(waveform_1))
+        len_boxcar = 200
+        for i in range(len(waveform_1)):
+            for j in range(len_boxcar):
+                if (i - j < len(waveform_1) and i - j > 0): 
+                    conv_waveform[i] += waveform_1[i-j] 
+        return conv_waveform
+
+    recieved_freq = peak_frequency
+    #################################################################################### Step 2: Mixing 
+
+    phase_shift = []
+    phase_shift_times = []
+    phase_reshaped = []
+    for r in range(NUM_PULSES):
+
+        ############################################################### Convert to baseband
+        times_to_conv = times_reshaped[r]
+        sin_ref_fast_time = np.sin(2*np.pi*recieved_freq*(times_to_conv - times_to_conv[0])) * recieved_pulses_reshaped[r]
+        cos_ref_fast_time = np.cos(2*np.pi*recieved_freq*(times_to_conv - times_to_conv[0])) * recieved_pulses_reshaped[r]
+
+        ################################################################ Low pass filter the sine wave
+        sin_ref_fast_time =  np.apply_along_axis(lambda x: sosfilt(lowpass_sin_cos_ref, x), axis=0, arr = sin_ref_fast_time)
+        cos_ref_fast_time = np.apply_along_axis(lambda x: sosfilt(lowpass_sin_cos_ref, x), axis=0, arr = cos_ref_fast_time)
+
+        ################################################################ Convolve with boxcar (Pulse compression)
+        sin_ref_fast_time = ruth_convolution(sin_ref_fast_time)
+        cos_ref_fast_time = ruth_convolution(cos_ref_fast_time)
+
+        ################################################################ Arctangent to get phase shift
+        phase_shift_fast_time = np.arctan2(sin_ref_fast_time, cos_ref_fast_time)
+        # plt.plot(times_to_conv, phase_shift_fast_time)
+        # plt.show()
+
+        ################################################################ Add to 1D array and 2D array
+        phase_reshaped.append(phase_shift_fast_time)
+        for c in range(len(phase_shift_fast_time)):
+            phase_shift.append(phase_shift_fast_time[c])
+            phase_shift_times.append(times_to_conv[c])
+
+    plt.title("Phase shift versus slow time")
+    plt.xlabel("Time (ms)")
+    plt.ylabel("Phase shift (radians)")
+    plt.plot(phase_shift_times, phase_shift)
+    phase_reshaped = np.array(phase_reshaped)
+
+    for c in range(len(phase_reshaped[0])):
+        ################################################################ Filter along range line
+        my_col = phase_reshaped[:,c]
+        phase_reshaped[:,c] = medfilt(my_col, 9)
+
+    return phase_reshaped
+
+
+
+####################################################################################################### Plotting functions
+
+# Plots
+
+def plot_heat_map(input_files, stddev = 3, use_emg = False, plot_circuit_env = False):
     
     # Retrieve the data we need for the heat map
     hammer_times = input_files[0]
@@ -293,8 +315,10 @@ def plot_heat_map(input_files, stddev = 3, use_emg = False):
     emg_recieved = input_files[2]
     cuff_times_reshaped = input_files[3]
     cuff_recieved_reshaped = input_files[4]
-    time_ticks = input_files[5]
-    NUM_PULSES = input_files[6]
+    circuit_env_reshaped = input_files[5]
+    calculated_envelope_reshaped = input_files[6]
+    time_ticks = input_files[7]
+    NUM_PULSES = input_files[8]
 
     # Plot using GridSpec
     fig = plt.figure(figsize=(6, 8))
@@ -313,7 +337,9 @@ def plot_heat_map(input_files, stddev = 3, use_emg = False):
 
     # Cuff signal subplot
     ax2 = plt.subplot(gs[1])
-    cuff_vals_for_heatmap = np.asarray(cuff_recieved_reshaped) - np.asarray(cuff_recieved_reshaped)[0, :]
+    cuff_vals_for_heatmap = np.asarray(calculated_envelope_reshaped) - np.asarray(calculated_envelope_reshaped)[0, :]
+    if plot_circuit_env: 
+        cuff_vals_for_heatmap = np.asarray(circuit_env_reshaped) - np.asarray(circuit_env_reshaped)[0, :]
     lower_outliers, upper_outliers, lower_lim_imshow, upper_lim_imshow = find_outliers_std(cuff_vals_for_heatmap, stddev)
     im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim_imshow)
     ax2.set_title('Circuit envelope: \nPulse height vs time normalize to start of pulse, all pulses overlayed')
@@ -389,8 +415,136 @@ def plot_heat_map(input_files, stddev = 3, use_emg = False):
                 reflex_time = cuff_times_reshaped[r][c]
     print(f"Auto-detect found: Maximum muscle contraction found at {reflex_time} ms after hammer hit.")
 
-circuit_env_data = [csv_times, csv_hammer, [], times_reshaped, circuit_envelope_reshaped, time_ticks, NUM_PULSES]
-calc_env_data = [csv_times, csv_hammer, [], times_reshaped, calculated_envelope_reshaped, time_ticks, NUM_PULSES]
-phase_data = [csv_times, csv_hammer, [], times_reshaped, phase_reshaped, time_ticks, NUM_PULSES]
-print("3. Phase shift")
-plot_heat_map(phase_data, 2)
+def get_gif(all_csv_data, col_indexes, save_as_mp4 = True, plot_circuit_envelope = True, plot_calculated_envelope = True, plot_hammer = True, compare_contraction = False, active_recieved_pulses_filtered = None):
+    save_as_mp4 = True # Saves as GIF when this is false. You need ffmeg installed to save as mp4.
+    use_raw_envelope = False
+    csv_times = all_csv_data[:,col_indexes[0]]
+    csv_square_pulses = all_csv_data[:,col_indexes[2]]
+    csv_recieved_pulses = all_csv_data[:,col_indexes[3]]
+    csv_circuit_envelope =  all_csv_data[:,col_indexes[4]]
+    csv_hammer = all_csv_data[:,col_indexes[1]]
+    emg_recieved = all_csv_data[:, col_indexes[5]]
+
+    dt = np.mean(np.diff(csv_times))
+    fs = 1 / dt  # Sampling frequency
+    filtered_recieved_pulses = get_filtered_pulses(csv_recieved_pulses, fs, use_raw_envelope)
+    hammer_times, hammer_recieved, emg_recieved, times_reshaped, recieved_pulses_reshaped, circuit_envelope_reshaped, calculated_envelope_reshaped, time_ticks, NUM_PULSES = get_reshaped_arrays(all_csv_data, col_indexes)
+
+    #######################################################################################################
+
+    min_y_axis = min(filtered_recieved_pulses)-1
+    max_y_axis = max(filtered_recieved_pulses)+1
+    scale_circuit_envelope = max_y_axis*1.0/max(csv_circuit_envelope)
+    scale_hammer = max_y_axis*1.0/max(csv_hammer)
+
+    shift_active_up =  np.average(filtered_recieved_pulses) - np.average(active_recieved_pulses_filtered) if compare_contraction else 0
+    shift_calc_env_up = 0 #np.average(filtered_recieved_pulses) - np.average(calculated_envelope)
+
+    def update(frame):
+        plt.cla()  # Clear the current axes
+        plt.plot(times_reshaped[frame] - times_reshaped[frame][0], recieved_pulses_reshaped[frame], label=f'Filtered recieved signal', alpha=0.7)
+        if (plot_circuit_envelope): 
+            plt.plot(times_reshaped[frame] - times_reshaped[frame][0], circuit_envelope_reshaped[frame]*scale_circuit_envelope, label=f'Circuit envelope', alpha=0.7)
+        if (plot_calculated_envelope):
+            plt.plot(times_reshaped[frame] - times_reshaped[frame][0], calculated_envelope_reshaped[frame]+shift_calc_env_up, label=f'Calculated envelope. shifted {shift_calc_env_up:.2f} mV up', alpha=0.7)
+        '''
+        if (plot_hammer):
+            plt.plot(times_reshaped[frame] - times_reshaped[frame][0], hammer_signal_reshaped[frame]*scale_hammer, label=f'Hammer (scaled {scale_hammer:.2f})', alpha=0.7)
+        if (compare_contraction):
+            plt.plot(active_times_reshaped[frame] - active_times_reshaped[frame][0], active_recieved_pulses_reshaped[frame]+shift_active_up, label=f'Active contraction pulse, shifted {shift_active_up:.2f} mV up', alpha=0.3)
+        '''
+        plt.legend(loc='upper right')
+        plt.xlim(0, times_reshaped[0][-1] - times_reshaped[0][0])
+        plt.ylim(min_y_axis, max_y_axis)
+        plt.title(f'Pulse {frame}, starts at {times_reshaped[frame][0]} ms since hammer hit')
+        plt.xlabel('Time (ms) within pulse')
+        plt.ylabel('Amplitude (mV)')
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ani = FuncAnimation(fig, update, frames=NUM_PULSES, repeat=False)
+
+    # Save as GIF
+    extension = ".mp4" if save_as_mp4 else ".gif"
+    save_place = file_folder_name + "/" + specific_file_name + '_pulse_animation' + extension
+    writer = FFMpegWriter(fps=10, metadata=dict(artist='Me'), bitrate=1800) if save_as_mp4 else PillowWriter(fps=10)
+    ani.save(save_place, writer)
+    print(f"Saved at: {save_place}")
+    plt.show()
+
+def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env = True):
+    times_arr = []
+    lines_arr = []
+    i = 0
+    
+    for input_files in input_file_array:
+        hammer_times = input_files[0]
+        hammer_recieved = input_files[1]
+        emg_recieved = input_files[2]
+        cuff_times_reshaped = input_files[3]
+        cuff_recieved_reshaped = input_files[4]
+        circuit_env_reshaped = input_files[5]
+        calculated_envelope_reshaped = input_files[6]
+        time_ticks = input_files[7]
+        NUM_PULSES = input_files[8]
+
+        dt = np.mean(np.diff(hammer_times))
+
+        arr_of_interest = calculated_envelope_reshaped if use_calculated_env else circuit_env_reshaped
+        these_times = []
+        these_lines = []
+        for r in range(NUM_PULSES):
+            these_times.append(cuff_times_reshaped[r,0])
+            if use_integral: these_lines.append(np.sum(arr_of_interest[r])*dt)
+            else: these_lines.append(np.average(arr_of_interest[r]))
+        
+        times_arr.append(np.asarray(these_times))
+        plt.plot(these_times, these_lines, label = legends[i])
+        plt.ylim(0, 50)
+        plt.xlabel("Time since hammer hit (ms)")
+        plt.ylabel("Voltage (mV)")
+        plt.title("Integral of each pulse over time")
+
+        if len(lines_arr) == 0: lines_arr = np.asarray(these_lines)
+        else: 
+            lines_arr = np.add(np.asarray(these_lines[:min(len(these_lines), len(lines_arr))]), 
+                                 np.asarray(lines_arr[:min(len(these_lines), len(lines_arr))]))
+        i+=1
+    
+    plt.show()
+
+    plt.plot(times_arr[0][:min(len(times_arr[0]), len(lines_arr))], 
+             (lines_arr/(1.0*len(times_arr)))[:min(len(times_arr[0]), len(lines_arr))])
+    plt.ylim(0, 50)
+    plt.xlabel("Time since hammer hit (ms)")
+    plt.ylabel("Voltage (mV)")
+    plt.title("Integral of each pulse over time")
+    plt.show()
+
+        
+
+
+if __name__ == "__main__":
+    # col_indexes = [times, hammer, transmit, recieved, circuit_env, emg = 1]
+
+    legends = ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9", "t10"]
+    col_order = [0, 2, 3, 1, 1, 1]  # time, recieved, hammer, square
+
+    file_names = ["src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial1.txt", 
+                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial2.txt",
+                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial3.txt",
+                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial4.txt",
+                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial5.txt",
+                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial6.txt", 
+                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial7.txt",
+                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial8.txt",
+                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial9.txt",
+                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial10.txt"]
+
+    input_files_across_trials = []
+    for file_name in file_names:
+        file_folder_name = file_name[:file_name.rindex("/")]
+        specific_file_name = file_name[file_name.rindex("/")+1:file_name.rindex(".")]
+        t1_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+").to_numpy()
+        input_files_across_trials.append(get_reshaped_arrays(t1_csv, col_order))
+    plot_2d(input_files_across_trials, legends)
+        
