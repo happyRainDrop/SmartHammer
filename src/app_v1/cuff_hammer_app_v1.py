@@ -47,7 +47,7 @@ Instructions for use:
             Close the image, and the program will complete, and save to the location you specified
 
             4. Example of what is printed to terminal on a successful run:
-                PS C:\Users\tealw\Documents\PlatformIO\Projects\SmartHammer-1> 
+                PS C:\\Users\\tealw\\Documents\\PlatformIO\\Projects\\SmartHammer-1> 
                 & C:/Users/tealw/AppData/Local/Programs/Python/Python310/python.exe 
                 c:/Users/tealw/Documents/PlatformIO/Projects/SmartHammer-1/src/app_v1/cuff_hammer_app_v1.py 
                 --filename_suffix ruth_box_test_trial_11 
@@ -157,9 +157,9 @@ def read_from_serial(port, baud_rate, output_file, done_event):
                         line = line.decode('utf-8').rstrip()                    
                         # If valid data, save to csv
                         if is_valid_data(line, port):
-                            if not saving_data:
+                            if not saving_data and (port==ports[1] and str(line)[0] == '-' or port==ports[0] and str(line)[0]=='0'):
                                 print(f"{port}: Starting to save data to CSV, found line {line} is valid")
-                            saving_data = True
+                                saving_data = True
                             csvwriter.writerow(line.split(','))
                         # Otherwise, we are done reading.
                         else:
@@ -169,7 +169,7 @@ def read_from_serial(port, baud_rate, output_file, done_event):
                             saving_data = False
 
                     except:
-                        print(f"{port}: line {line} invalid.")
+                        print(f"WARNING ON {port}: line {line} invalid. Do not hit the hammer yet.")
                         saving_data = False
                         
     except serial.SerialException as e:

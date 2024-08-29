@@ -413,7 +413,7 @@ def plot_heat_map(input_files, stddev = 3, use_emg = False, plot_circuit_env = F
                 reflex_time = cuff_times_reshaped[r][c]
     print(f"Auto-detect found: Maximum muscle contraction found at {reflex_time} ms after hammer hit.")
 
-def get_gif(all_csv_data, col_indexes, save_as_mp4 = True, plot_circuit_envelope = True, plot_calculated_envelope = True, plot_hammer = True, compare_contraction = False, active_recieved_pulses_filtered = None):
+def get_gif(all_csv_data, col_indexes, save_as_mp4 = True, plot_hammer = False, plot_circuit_envelope = True, plot_calculated_envelope = True, compare_contraction = False, active_recieved_pulses_filtered = None, file_folder_name = "", specific_file_name = ""):
     save_as_mp4 = True # Saves as GIF when this is false. You need ffmeg installed to save as mp4.
     use_raw_envelope = False
     csv_times = all_csv_data[:,col_indexes[0]]
@@ -423,20 +423,17 @@ def get_gif(all_csv_data, col_indexes, save_as_mp4 = True, plot_circuit_envelope
     csv_hammer = all_csv_data[:,col_indexes[1]]
     emg_recieved = all_csv_data[:, col_indexes[5]]
 
-    dt = np.mean(np.diff(csv_times))
-    fs = 1 / dt  # Sampling frequency
-    filtered_recieved_pulses = get_filtered_pulses(csv_recieved_pulses, fs, use_raw_envelope)
     hammer_times, hammer_recieved, emg_recieved, times_reshaped, recieved_pulses_reshaped, circuit_envelope_reshaped, calculated_envelope_reshaped, time_ticks, NUM_PULSES = get_reshaped_arrays(all_csv_data, col_indexes)
 
     #######################################################################################################
 
-    min_y_axis = min(filtered_recieved_pulses)-1
-    max_y_axis = max(filtered_recieved_pulses)+1
+    min_y_axis = np.min(np.asarray(recieved_pulses_reshaped))-1
+    max_y_axis = np.max(np.asarray(recieved_pulses_reshaped))+1
     scale_circuit_envelope = max_y_axis*1.0/max(csv_circuit_envelope)
     scale_hammer = max_y_axis*1.0/max(csv_hammer)
 
-    shift_active_up =  np.average(filtered_recieved_pulses) - np.average(active_recieved_pulses_filtered) if compare_contraction else 0
-    shift_calc_env_up = 0 #np.average(filtered_recieved_pulses) - np.average(calculated_envelope)
+    shift_active_up =  np.average(np.asarray(recieved_pulses_reshaped)) - np.average(active_recieved_pulses_filtered) if compare_contraction else 0
+    shift_calc_env_up = 25+ np.average(np.asarray(recieved_pulses_reshaped)) - np.average(np.asarray(calculated_envelope_reshaped))
 
     def update(frame):
         plt.cla()  # Clear the current axes
@@ -445,12 +442,12 @@ def get_gif(all_csv_data, col_indexes, save_as_mp4 = True, plot_circuit_envelope
             plt.plot(times_reshaped[frame] - times_reshaped[frame][0], circuit_envelope_reshaped[frame]*scale_circuit_envelope, label=f'Circuit envelope', alpha=0.7)
         if (plot_calculated_envelope):
             plt.plot(times_reshaped[frame] - times_reshaped[frame][0], calculated_envelope_reshaped[frame]+shift_calc_env_up, label=f'Calculated envelope. shifted {shift_calc_env_up:.2f} mV up', alpha=0.7)
-        '''
+        #'''
         if (plot_hammer):
             plt.plot(times_reshaped[frame] - times_reshaped[frame][0], hammer_signal_reshaped[frame]*scale_hammer, label=f'Hammer (scaled {scale_hammer:.2f})', alpha=0.7)
         if (compare_contraction):
             plt.plot(active_times_reshaped[frame] - active_times_reshaped[frame][0], active_recieved_pulses_reshaped[frame]+shift_active_up, label=f'Active contraction pulse, shifted {shift_active_up:.2f} mV up', alpha=0.3)
-        '''
+        #'''
         plt.legend(loc='upper right')
         plt.xlim(0, times_reshaped[0][-1] - times_reshaped[0][0])
         plt.ylim(min_y_axis, max_y_axis)
@@ -549,6 +546,16 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
 if __name__ == "__main__":
     # col_indexes = [times, hammer, transmit, recieved, circuit_env, emg = 1]
 
+    file_name = "src/app_v1/data_from_experiments/flex_foot/ruth_flex_foot_pico/take1/ruthactivetrial2.csv"
+    file_folder_name = file_name[:file_name.rindex("/")]
+    specific_file_name = file_name[file_name.rindex("/")+1:file_name.rindex(".")]
+    col_order = [0, 2, 3, 1, 1, 1]  # time, recieved, hammer, square
+    t1_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+").to_numpy()
+    plot_heat_map(get_reshaped_arrays(t1_csv, col_order))
+    get_gif(t1_csv, col_order, plot_circuit_envelope = False, file_folder_name=file_folder_name, specific_file_name=specific_file_name)
+    '''
+    The below is for analyzing multiple trials at once.
+    
     legends = ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9", "t10"]
     col_order = [0, 2, 3, 1, 1, 1]  # time, recieved, hammer, square
 
@@ -582,4 +589,4 @@ if __name__ == "__main__":
 
     i = input_files_across_trials[0]
     plot_heat_map([i[0], i[1], i[2], i[3], i[4], total_thing/len(file_names), i[6], i[7], i[8]])
-        
+    '''  
