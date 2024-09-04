@@ -61,7 +61,8 @@ def get_filtered_pulses(data, Sampling_frequency, use_raw_envelope = False):
         Filter_lowcut =40000
         Filter_highcut =60000
         Filter_order = 4
-        # print(f"Sampling frequency: {Sampling_frequency}")
+        # print(f"Sampling frequency: {Sampling_frequency} Hz")
+        data = np.asarray(data, dtype=float)
         sos = butter(Filter_order, [Filter_lowcut, Filter_highcut], btype='bandpass', fs=Sampling_frequency, output='sos')
         return np.apply_along_axis(lambda x: sosfilt(sos, x), axis=0, arr = data)
 
@@ -126,7 +127,7 @@ def get_reshaped_arrays(all_csv_data, col_indexes):
     total_start_indicies =  []
     i = 0
     r = 0
-    tr = -7
+    tr = -5
     max_pulse_length_in_indicies = 0
     while i < (len(csv_square_pulses) - 1):
         if (csv_square_pulses[i] < tr and csv_square_pulses[i+1] >= tr):
@@ -305,7 +306,7 @@ def get_phase_arrays(all_csv_data, col_indexes):
 
 # Plots
 
-def plot_heat_map(input_files, stddev = 3, use_emg = False, plot_circuit_env = False):
+def plot_heat_map(input_files, folder_path = "", png_name = "", stddev = 3, use_emg = False, plot_circuit_env = False):
     
     # Retrieve the data we need for the heat map
     hammer_times = input_files[0]
@@ -344,8 +345,8 @@ def plot_heat_map(input_files, stddev = 3, use_emg = False, plot_circuit_env = F
     ax2.set_ylabel('Array index within pulse')
     ax2.set_xlabel('Start time of pulse (ms)')
     time_tick_positions = np.arange(0, NUM_PULSES, NUM_PULSES / len(time_ticks))
-    ax2.set_xticks(ticks=time_tick_positions[0::5])
-    ax2.set_xticklabels(labels=time_ticks[0::5])
+    ax2.set_xticks(ticks=time_tick_positions[0::int(len(time_ticks)/10)])
+    ax2.set_xticklabels(labels=time_ticks[0::int(len(time_ticks)/10)])
     ax2.tick_params(axis='x', rotation=90)
 
     # Colorbar subplot
@@ -396,6 +397,9 @@ def plot_heat_map(input_files, stddev = 3, use_emg = False, plot_circuit_env = F
     # Save the figure before showing it
     plt.subplots_adjust(hspace=1)
     plt.show()
+    str_name = folder_path + "/" + png_name + '.png'
+    if len(str_name) > 5: fig.savefig(str_name)
+    print(f"Saving to: {str_name}")
     plt.close(fig)
     
     # Return time of reflex
@@ -427,13 +431,12 @@ def get_gif(all_csv_data, col_indexes, save_as_mp4 = True, plot_hammer = False, 
 
     #######################################################################################################
 
-    min_y_axis = np.min(np.asarray(recieved_pulses_reshaped))-1
-    max_y_axis = np.max(np.asarray(recieved_pulses_reshaped))+1
+    lower_outliers, upper_outliers, min_y_axis, max_y_axis = find_outliers_std(np.asarray(recieved_pulses_reshaped))
     scale_circuit_envelope = max_y_axis*1.0/max(csv_circuit_envelope)
     scale_hammer = max_y_axis*1.0/max(csv_hammer)
 
-    shift_active_up =  np.average(np.asarray(recieved_pulses_reshaped)) - np.average(active_recieved_pulses_filtered) if compare_contraction else 0
-    shift_calc_env_up = 25+ np.average(np.asarray(recieved_pulses_reshaped)) - np.average(np.asarray(calculated_envelope_reshaped))
+    shift_active_up =  np.mean(np.asarray(recieved_pulses_reshaped)) - np.mean(active_recieved_pulses_filtered) if compare_contraction else 0
+    shift_calc_env_up = 10 + np.mean(np.asarray(recieved_pulses_reshaped)) - np.mean(np.asarray(calculated_envelope_reshaped))
 
     def update(frame):
         plt.cla()  # Clear the current axes
@@ -442,12 +445,12 @@ def get_gif(all_csv_data, col_indexes, save_as_mp4 = True, plot_hammer = False, 
             plt.plot(times_reshaped[frame] - times_reshaped[frame][0], circuit_envelope_reshaped[frame]*scale_circuit_envelope, label=f'Circuit envelope', alpha=0.7)
         if (plot_calculated_envelope):
             plt.plot(times_reshaped[frame] - times_reshaped[frame][0], calculated_envelope_reshaped[frame]+shift_calc_env_up, label=f'Calculated envelope. shifted {shift_calc_env_up:.2f} mV up', alpha=0.7)
-        #'''
+        '''
         if (plot_hammer):
             plt.plot(times_reshaped[frame] - times_reshaped[frame][0], hammer_signal_reshaped[frame]*scale_hammer, label=f'Hammer (scaled {scale_hammer:.2f})', alpha=0.7)
         if (compare_contraction):
             plt.plot(active_times_reshaped[frame] - active_times_reshaped[frame][0], active_recieved_pulses_reshaped[frame]+shift_active_up, label=f'Active contraction pulse, shifted {shift_active_up:.2f} mV up', alpha=0.3)
-        #'''
+        '''
         plt.legend(loc='upper right')
         plt.xlim(0, times_reshaped[0][-1] - times_reshaped[0][0])
         plt.ylim(min_y_axis, max_y_axis)
@@ -545,14 +548,23 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
 
 if __name__ == "__main__":
     # col_indexes = [times, hammer, transmit, recieved, circuit_env, emg = 1]
+    very_negative_number = -100
+    very_positive_number = 100
 
-    file_name = "src/app_v1/data_from_experiments/flex_foot/ruth_flex_foot_pico/take1/ruthactivetrial2.csv"
+    file_name = "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_10.csv"
     file_folder_name = file_name[:file_name.rindex("/")]
     specific_file_name = file_name[file_name.rindex("/")+1:file_name.rindex(".")]
-    col_order = [0, 2, 3, 1, 1, 1]  # time, recieved, hammer, square
-    t1_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+").to_numpy()
-    plot_heat_map(get_reshaped_arrays(t1_csv, col_order))
-    get_gif(t1_csv, col_order, plot_circuit_envelope = False, file_folder_name=file_folder_name, specific_file_name=specific_file_name)
+    col_order = [0, 3, 4, 1, 2, 1]  # time, recieved, env, hammer, square
+
+    my_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+")
+    my_csv.replace([float('-inf'), '-∞'], very_negative_number, inplace=True)
+    my_csv.replace([float('inf'), '∞'], very_positive_number, inplace=True)
+    my_csv = my_csv.to_numpy()
+    my_arr = get_reshaped_arrays(my_csv, col_order)
+   
+    # plot_heat_map(my_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=3, plot_circuit_env=True)
+    get_gif(my_csv, col_order, plot_circuit_envelope = True, file_folder_name=file_folder_name, specific_file_name=specific_file_name)
+    
     '''
     The below is for analyzing multiple trials at once.
     
