@@ -335,16 +335,17 @@ def plot_heat_map(input_files, folder_path = "", png_name = "", stddev = 3, use_
     ax1.legend()
 
     # Cuff signal subplot
+    title_addend = "Circuit" if plot_circuit_env else "Calculated"
     ax2 = plt.subplot(gs[1])
     cuff_vals_for_heatmap = np.asarray(calculated_envelope_reshaped) - np.asarray(calculated_envelope_reshaped)[0, :]
     if plot_circuit_env: 
         cuff_vals_for_heatmap = np.asarray(circuit_env_reshaped) - np.asarray(circuit_env_reshaped)[0, :]
     lower_outliers, upper_outliers, lower_lim_imshow, upper_lim_imshow = find_outliers_std(cuff_vals_for_heatmap, stddev)
     im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim_imshow)
-    ax2.set_title('Circuit envelope: \nPulse height vs time normalize to start of pulse, all pulses overlayed')
+    ax2.set_title(title_addend+' envelope: \nPulse height vs time normalize to start of pulse, all pulses overlayed')
     ax2.set_ylabel('Array index within pulse')
     ax2.set_xlabel('Start time of pulse (ms)')
-    time_tick_positions = np.arange(0, NUM_PULSES, NUM_PULSES / len(time_ticks))
+    time_tick_positions = np.arange(1, NUM_PULSES, NUM_PULSES / len(time_ticks))
     ax2.set_xticks(ticks=time_tick_positions[0::int(len(time_ticks)/10)])
     ax2.set_xticklabels(labels=time_ticks[0::int(len(time_ticks)/10)])
     ax2.tick_params(axis='x', rotation=90)
@@ -397,7 +398,8 @@ def plot_heat_map(input_files, folder_path = "", png_name = "", stddev = 3, use_
     # Save the figure before showing it
     plt.subplots_adjust(hspace=1)
     plt.show()
-    str_name = folder_path + "/" + png_name + '.png'
+
+    str_name = folder_path + "/" + png_name + '_'+title_addend+'_envelope.png'
     if len(str_name) > 5: fig.savefig(str_name)
     print(f"Saving to: {str_name}")
     plt.close(fig)
@@ -431,12 +433,12 @@ def get_gif(all_csv_data, col_indexes, save_as_mp4 = True, plot_hammer = False, 
 
     #######################################################################################################
 
-    lower_outliers, upper_outliers, min_y_axis, max_y_axis = find_outliers_std(np.asarray(recieved_pulses_reshaped))
+    lower_outliers, upper_outliers, min_y_axis, max_y_axis = find_outliers_std(np.asarray(recieved_pulses_reshaped), 10)
     scale_circuit_envelope = max_y_axis*1.0/max(csv_circuit_envelope)
     scale_hammer = max_y_axis*1.0/max(csv_hammer)
 
     shift_active_up =  np.mean(np.asarray(recieved_pulses_reshaped)) - np.mean(active_recieved_pulses_filtered) if compare_contraction else 0
-    shift_calc_env_up = 10 + np.mean(np.asarray(recieved_pulses_reshaped)) - np.mean(np.asarray(calculated_envelope_reshaped))
+    shift_calc_env_up = 1 + np.mean(np.asarray(recieved_pulses_reshaped)) - np.mean(np.asarray(calculated_envelope_reshaped))
 
     def update(frame):
         plt.cla()  # Clear the current axes
@@ -551,7 +553,7 @@ if __name__ == "__main__":
     very_negative_number = -100
     very_positive_number = 100
 
-    file_name = "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_10.csv"
+    file_name = "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/hamid/Pico/hamidtrial16.csv"
     file_folder_name = file_name[:file_name.rindex("/")]
     specific_file_name = file_name[file_name.rindex("/")+1:file_name.rindex(".")]
     col_order = [0, 3, 4, 1, 2, 1]  # time, recieved, env, hammer, square
@@ -562,8 +564,9 @@ if __name__ == "__main__":
     my_csv = my_csv.to_numpy()
     my_arr = get_reshaped_arrays(my_csv, col_order)
    
-    # plot_heat_map(my_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=3, plot_circuit_env=True)
-    get_gif(my_csv, col_order, plot_circuit_envelope = True, file_folder_name=file_folder_name, specific_file_name=specific_file_name)
+    plot_heat_map(my_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=6, plot_circuit_env=True)
+    plot_heat_map(my_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=5, plot_circuit_env=False)
+    # get_gif(my_csv, col_order, plot_circuit_envelope = False, file_folder_name=file_folder_name, specific_file_name=specific_file_name)
     
     '''
     The below is for analyzing multiple trials at once.
