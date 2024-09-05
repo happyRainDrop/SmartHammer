@@ -1,6 +1,6 @@
 '''
 Name: cuff_hammer_app_v1.py
-Last updated: 8/21/26 by Ruth Berkun
+Last updated: 8/21/24 by Ruth Berkun
 
 Table of contents:
     Functions to parse Arduino serial data:

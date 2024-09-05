@@ -1,3 +1,43 @@
+'''
+Name: analyze_Pico_data.py
+Last updated: 9/5/24 by Ruth Berkun
+
+Table of contents:
+    Helper functions:
+        find_maxima_envelope(signal, sampling_rate, approx_frequency):
+            Returns the envelope optained by connecting the relative maxima of the signal
+        butter_lowpass_filter(data, cutOff, fs, order=4):
+            Lowpass filter, returns lowpass filtered data
+        get_filtered_pulses(data, Sampling_frequency, use_raw_envelope = False):
+            Returns filtered version of data
+        get_envelope(data, use_raw_envelope = False):
+            Returns envelope of data
+        find_outliers_std(data, threshold=3):
+            Used to set color limits on heat maps and axis limits on gif
+    Functions to analyze cuff data:
+        get_reshaped_arrays(all_csv_data, col_indexes, skip_first_pulse = False):
+            Outputs 2D array for cuff heatmap, as well as other processing information for other functions to use.
+        get_phase_arrays(all_csv_data, col_indexes):
+            Used to analyze phase shift of the signal over slow time. Not used currently
+            and still in development.
+
+    Functions to display and save data:
+        plot_heat_map(input_files, folder_path = "", png_name = "", stddev = 3, use_emg = False, plot_circuit_env = False):
+            Plots heat map of given 2D array, displays it, allows user to search for a maximum, and saves it to specified location
+        get_gif(all_csv_data, col_indexes, save_as_mp4 = True, plot_hammer = False, plot_circuit_envelope = True, plot_calculated_envelope = True, compare_contraction = False, active_recieved_pulses_filtered = None, file_folder_name = "", specific_file_name = ""):
+            Plot the recieved pulses over time as a GIF or mp4
+        plot_2d(input_file_array, legends, use_integral = True, use_calculated_env = True, folder="", title="fig"):
+            Plots a heatmap as a single line (the line being the intergal or average of each pulse.)
+
+Instructions for use: 
+    - Stuff for user to edit is under 'if __name__ == "__main__":'
+        Wherever you see a "# !!!!!!!!!!!!!!!", this is something you should pay attention to edit.
+    - Once user is done editing the file location and function call parameters:
+    Lastly, in the terminal, run python analyze_Pico_data.py
+'''
+
+####################################################################################################### Imports
+
 import numpy as np
 import matplotlib.pyplot as plt
 import time as time
@@ -42,18 +82,29 @@ def find_maxima_envelope(signal, sampling_rate, approx_frequency):
 
     return envelope
 
-def butter_lowpass(cutOff, fs, order=5):
-    nyq = 0.5 * fs
-    normalCutoff = cutOff / nyq
-    b, a = butter(order, normalCutoff, btype='low', analog = True)
-    return b, a
-
 def butter_lowpass_filter(data, cutOff, fs, order=4):
+    def butter_lowpass(cutOff, fs, order=5):
+        nyq = 0.5 * fs
+        normalCutoff = cutOff / nyq
+        b, a = butter(order, normalCutoff, btype='low', analog = True)
+        return b, a
+    
     b, a = butter_lowpass(cutOff, fs, order=order)
     y = lfilter(b, a, data)
     return y
 
 def get_filtered_pulses(data, Sampling_frequency, use_raw_envelope = False):
+    '''
+    Filters the inputted signal.
+
+    Inputs:
+    - data: array of voltages of the signal to filter
+    - Sampling frequency: How many Hz data was sampled at
+    - use_raw_envelope: If true, do median filtering, otherwise do bandpass filter.
+
+    Outputs:
+    - Array of filtered voltages.
+    '''
     if (use_raw_envelope):
         kernel_size = 3
         return medfilt(data, kernel_size)
@@ -67,6 +118,16 @@ def get_filtered_pulses(data, Sampling_frequency, use_raw_envelope = False):
         return np.apply_along_axis(lambda x: sosfilt(sos, x), axis=0, arr = data)
 
 def get_envelope(data, use_raw_envelope = False):
+    '''
+    Get the envelope of the signal.
+
+    Inputs:
+    - data: array of voltages of the signal to filter
+    - use_raw_envelope: If true, use maxima envelope, otherwise use smooth Hilbert envelope.
+
+    Outputs:
+    - array of the envelope voltages
+    '''
     if use_raw_envelope:
         lowest_freq_of_recieved_sig = 20000 # needs to be much lower than 52 kHz -- this is what determines the distance between points on the envelope
         osc_sampling_freq = 200000
@@ -77,6 +138,20 @@ def get_envelope(data, use_raw_envelope = False):
     return calculated_envelope
 
 def find_outliers_std(data, threshold=3):
+    '''
+    Used to set color limits on heat maps and axis limits on gif.\n
+
+    Inputs: 
+    - data: Data to find outliers of
+    - threshold: How many standard deviations away from the mean is considered an outlier.
+
+    Outputs:
+    - lower_outliers: list of lower outlier voltages
+    - upper_outliers: list of upper outlier voltages
+    - lower_bound: Smallest number that is not an outlier
+    - upper_bound: Largerst number that is not an outlier
+    '''
+
     # Calculate the mean and standard deviation
     mean = np.mean(data)
     std_dev = np.std(data)
@@ -93,13 +168,26 @@ def find_outliers_std(data, threshold=3):
 
 ####################################################################################################### Processing functions
 
-def get_reshaped_arrays(all_csv_data, col_indexes):
+def get_reshaped_arrays(all_csv_data, col_indexes, skip_first_pulse = False):
     '''
-    Input:. \n
-        all_csv_data: your csv data as a pandas dataframe
-        col_indexes: Tells us which column in your CSV corresponds to what data collected from oscilloscope!
-        col_indexes = [times_col_index, hammer_index, transmit_col_index, recieve_col_index, circuit_col_index, emg_col_index = 1]
+    Outputs 2D array for cuff heatmap, as well as other processing information for other functions to use. \n
+
+    Input: \n
+    - all_csv_data: your csv data as a pandas dataframe
+    - col_indexes: Tells us which column in your CSV corresponds to what data collected from oscilloscope. \n
+    \t col_indexes = [times_col_index, hammer_index, transmit_col_index, recieve_col_index, circuit_col_index, emg_col_index = 1]
+    (It tells us which column of the CSV corresponds to times, to hammer, to cuff, etc)
+    - skip_first_pulse: Set this true to skip the first pulse we see.
+                    **Basically, this only needs to be set True if you plot the heatmap and it just looks like horizontal stripes.**
+                    (it means that the first pulse we found was actually the middle of a set of pulses, so we need to skip it
+                    and start from the next set of transmit pulses for the reshaping.)
+
     Return: hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, circuit_env_reshaped, time_ticks, NUM_PULSES
+    In each reshaped array: one row is one pulse. Reshaped arrays are 2D and all other arrays are 1D.
+    - hammer_times, hammer_recieved, emg: Times and voltages of the hammer and EMG signal from the CSV.
+    - cuff_times_reshaped: The CSV times reshaped in the same way the recieved signal is reshaped.
+    - cuff_recieved_reshaped, circuit_env_reshaped: Filtered recieved pulses and circuit envelope pulses reshaped, respectively.
+    - time_ticks: Start time of each pulse (1D array)
     '''
     use_raw_envelope = False
     keep_raw_data = True
@@ -125,7 +213,7 @@ def get_reshaped_arrays(all_csv_data, col_indexes):
 
     #####################################################  get reshaping scheme from transmit pulse
     total_start_indicies =  []
-    i = 0
+    i = 600 if skip_first_pulse else 0
     r = 0
     tr = -5
     max_pulse_length_in_indicies = 0
@@ -195,6 +283,10 @@ def get_reshaped_arrays(all_csv_data, col_indexes):
     return hammer_times, hammer_recieved, emg_recieved, times_reshaped, recieved_pulses_reshaped, circuit_envelope_reshaped, calculated_envelope_reshaped, time_ticks, NUM_PULSES
 
 def get_phase_arrays(all_csv_data, col_indexes):
+    '''
+    Used to analyze phase shift of the signal over slow time. Not used currently
+    and still in development.
+    '''
     #################################################################################### Quadrature phase stuff
     ############################################# Quadrature modulation time! ###########################################
     #####################################################################################################################
@@ -300,14 +392,28 @@ def get_phase_arrays(all_csv_data, col_indexes):
 
     return phase_reshaped
 
-
-
 ####################################################################################################### Plotting functions
 
 # Plots
 
 def plot_heat_map(input_files, folder_path = "", png_name = "", stddev = 3, use_emg = False, plot_circuit_env = False):
+    '''
+    Plots heat map of given 2D array, displays it, allows user to search for a maximum, and saves it to specified location.\n
+
+    Inputs:
+    - input_files: Same format as output of get_reshaped_arrays.
+        hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, circuit_env_reshaped, time_ticks, NUM_PULSES
+    - folder_path: Folder to save heatmap in. Must NOT end in "/". If it and png_name are blank, image will not be saved.
+    - png_name: Name of image to save heatmap in. If it and folder_path are blank, image will not be saved.
+    - stddev: How many standard deviations from the mean will be considered an outlier. Outliers determine the color limits
+            of the heat map. Make it lower to see more intense colors overall, and higher to see less intense colors overall.
+    - use_emg: Boolean telling us whether or not to plot the EMG signal on top of the hammer signal.
+    - plot_circuit_env: If true, the heat map will be of the circuit envelope. If false, the heat map will be of the calculated envelope.
     
+    Ouputs:
+    - Displays (and, if specified, saves) heatmap of the passed input arrays.
+    '''
+
     # Retrieve the data we need for the heat map
     hammer_times = input_files[0]
     hammer_recieved = input_files[1]
@@ -420,6 +526,24 @@ def plot_heat_map(input_files, folder_path = "", png_name = "", stddev = 3, use_
     print(f"Auto-detect found: Maximum muscle contraction found at {reflex_time} ms after hammer hit.")
 
 def get_gif(all_csv_data, col_indexes, save_as_mp4 = True, plot_hammer = False, plot_circuit_envelope = True, plot_calculated_envelope = True, compare_contraction = False, active_recieved_pulses_filtered = None, file_folder_name = "", specific_file_name = ""):
+    '''
+    Plot the recieved pulses over time as a GIF or mp4.\n
+
+    Inputs:
+    - all_csv_data: your csv data as a pandas dataframe
+    - col_indexes: Tells us which column in your CSV corresponds to what data collected from oscilloscope!
+        col_indexes = [times_col_index, hammer_index, transmit_col_index, recieve_col_index, circuit_col_index, emg_col_index = 1]
+            (It tells us which column of the CSV corresponds to times, to hammer, to cuff, etc)
+    Optional arguments:
+    - save_as_mp4: If true, saves as MP4, if false, saves as GIF. You must have ffmeg installed to save as an MP4.
+    - plot_hammer: Set true to plot the hammer signal in the gif
+    - plot_circuit_envelope: Set true to plot the circuit envelope in the gif
+    - plot_circuit_envelope: Set true to plot the calculated envelope in the gif
+    - compare_contraction: Set true to plot the contracted signal in the gif as well (in the background). Not available currently.
+    - active_recieved_pulses_filtered: The active recieved pulses (contracted signal) to plot in the background.
+    - file_folder_name: Folder to save gif in. Must NOT end in "/". 
+    - specific_file_name: Name of gif to save. 
+    '''
     save_as_mp4 = True # Saves as GIF when this is false. You need ffmeg installed to save as mp4.
     use_raw_envelope = False
     csv_times = all_csv_data[:,col_indexes[0]]
@@ -472,6 +596,20 @@ def get_gif(all_csv_data, col_indexes, save_as_mp4 = True, plot_hammer = False, 
     plt.show()
 
 def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env = True, folder="", title="fig"):
+    '''
+    Plots a heatmap as a single line (the line being the intergal or average of each pulse.)
+
+    Inputs:
+     - input_file_array: An array of input_files. Each input_file is the same format as input_files in plot_heat_map and get_reshaped_arrays.
+     - legends: Titles of the plots to save
+     - use_integral: True to use integral, false to use average. Doesn't really matter because both calculate the sum of the abs of each pulse anyways.
+     - use_calculated_env: True to analyze the pulses from the calculated env, false to analyze the pulses from the circuit env
+     - folder: Location to save images in. Do not end in "/"
+     - title: Name of figure to save.
+
+     Ouputs:
+     - Lineplots for each file in input_file_array, saved to specified location.
+    '''
     times_arr = []
     lines_arr = []
     i = 0
@@ -549,31 +687,54 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
 
 
 if __name__ == "__main__":
-    # col_indexes = [times, hammer, transmit, recieved, circuit_env, emg = 1]
+    # REMINDER: col_index_order: col_indexes = [times, hammer, transmit, recieved, circuit_env, emg = 1]
+    
+    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Example usage: Uncomment to analyze one trial.
+    ''' 
+    # !!!!!!!!!!!!!!! User should edit: file_name, col_order as needed.
+    file_name = "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/hamid/Pico/hamidtrial14.csv"
+    col_order = [0, 3, 4, 1, 2, 1]  # time, recieved, env, hammer, square
+    # !!!!!!!!!!!!!!!
+
+    # 1. Replace "infinity" signs in oscilloscope file if present, and shape into numpy dataframe.
     very_negative_number = -100
     very_positive_number = 100
-
-    file_name = "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/hamid/Pico/hamidtrial16.csv"
     file_folder_name = file_name[:file_name.rindex("/")]
     specific_file_name = file_name[file_name.rindex("/")+1:file_name.rindex(".")]
-    col_order = [0, 3, 4, 1, 2, 1]  # time, recieved, env, hammer, square
-
     my_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+")
     my_csv.replace([float('-inf'), '-∞'], very_negative_number, inplace=True)
     my_csv.replace([float('inf'), '∞'], very_positive_number, inplace=True)
     my_csv = my_csv.to_numpy()
-    my_arr = get_reshaped_arrays(my_csv, col_order)
+
+    # 2. Get reshaped arrays. 
+    # !!!!!!!!!!!!!! Use should make skip_first_pulse = True if the heat plot is only horizontal streaks
+    # (a sign of improper reshaping).
+    my_arr = get_reshaped_arrays(my_csv, col_order, skip_first_pulse=False)
    
-    plot_heat_map(my_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=6, plot_circuit_env=True)
-    plot_heat_map(my_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=5, plot_circuit_env=False)
-    # get_gif(my_csv, col_order, plot_circuit_envelope = False, file_folder_name=file_folder_name, specific_file_name=specific_file_name)
+    # 3. Plots! These will save in the same folder that the file you are reading is in (unless you edit file_folder_name)
     
-    '''
-    The below is for analyzing multiple trials at once.
+    # Heat map of circuit envelope
+    # plot_heat_map(my_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=6, plot_circuit_env=True)
+
+    # Heat map of calculated envelope
+    plot_heat_map(my_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=2.5, plot_circuit_env=False)
     
+    # GIF of calculated envelope and recieved pulses.
+    # get_gif(my_csv, col_order, save_as_mp4=False, plot_circuit_envelope = False, file_folder_name=file_folder_name, specific_file_name=specific_file_name)
+    
+    # 2D average map of calculated envelope.
+    # input_file_array = [my_arr]
+    # legends = [specific_file_name]
+    # plot_2d(input_file_array, legends, folder=file_folder_name, title=specific_file_name)
+    # '''
+
+    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Example usage: Analyzing multiple trials in one experiment 
+    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! (2D line plot and average heatmap) 
+    #'''
+    
+    # !!!!!!!!!!!!!!! User should edit: legends, col_order, file_names as needed.
     legends = ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9", "t10"]
     col_order = [0, 2, 3, 1, 1, 1]  # time, recieved, hammer, square
-
     file_names = ["src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial1.txt", 
                   "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial2.txt",
                   "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial3.txt",
@@ -584,24 +745,35 @@ if __name__ == "__main__":
                   "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial8.txt",
                   "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial9.txt",
                   "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial10.txt"]
+    experiment_name = "sophie"
+    # !!!!!!!!!!!!!!!
 
     input_files_across_trials = []
-    total_thing = []
+    summed_heatmap_across_trials = []
     file_folder_name = ""
-    this_file_name = "sophie"
+
+    # Loop through each file in the folder provided, extracting the heatmap array from each one.
     for file_name in file_names:
+        # Get the name of file and folder the CSV is extracted from.
         file_folder_name = file_name[:file_name.rindex("/")]
         specific_file_name = file_name[file_name.rindex("/")+1:file_name.rindex(".")]
-        t1_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+").to_numpy()
-        t1_arr = get_reshaped_arrays(t1_csv, col_order)
-        if len(total_thing)==0: total_thing = np.asarray(t1_arr[5])
-        else: total_thing = np.add(total_thing[:min(len(total_thing), len(t1_arr[5]))], 
-                                   np.asarray(t1_arr[5][:min(len(total_thing), len(t1_arr[5]))]))
 
-        input_files_across_trials.append(t1_arr)
-    print(file_folder_name)
-    # plot_2d(input_files_across_trials, legends, folder=file_folder_name, title=this_file_name)
+        # Read the CSV and reshape the array.
+        trial_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+").to_numpy()
+        trial_arr = get_reshaped_arrays(trial_csv, col_order)
 
-    i = input_files_across_trials[0]
-    plot_heat_map([i[0], i[1], i[2], i[3], i[4], total_thing/len(file_names), i[6], i[7], i[8]])
-    '''  
+        # Running sum of heatmaps across trials.
+        # The slicing is to account for the fact that sometimes the length of the arrays is off by 1.
+        if len(summed_heatmap_across_trials)==0: summed_heatmap_across_trials = np.asarray(trial_arr[5])
+        else: summed_heatmap_across_trials = np.add(summed_heatmap_across_trials[:min(len(summed_heatmap_across_trials), len(trial_arr[5]))], 
+                                   np.asarray(trial_arr[5][:min(len(summed_heatmap_across_trials), len(trial_arr[5]))]))
+
+        input_files_across_trials.append(trial_arr)
+   
+    # Plot the overlayed line plots of each trial. The saved image will have the variance across lines in it.
+    # plot_2d(input_files_across_trials, legends, folder=file_folder_name, title=experiment_name)
+
+    # Plot the average heatmap across all trials for this experiment.
+    i = input_files_across_trials[0]    # Arbitrarily use the times and hammer strike from the first trial. 
+    plot_heat_map([i[0], i[1], i[2], i[3], i[4], summed_heatmap_across_trials/len(file_names), i[6], i[7], i[8]], folder_path=file_folder_name, png_name=experiment_name+"_average")
+    # '''  
