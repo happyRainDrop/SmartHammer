@@ -1,3 +1,19 @@
+'''
+Name: cuff_calibration_app_v1.py
+Last updated: 8/5/24 by Ruth Berkun
+
+Table of contents:
+    Functions to parse Arduino serial data:
+        read_from_serial(port, baudrate, output_file, data_queue):
+        start_serial_reading(port, baudrate, output_file, data_queue):
+    Functions to handle plot animation:
+        animate(i, line, data_queue):
+        on_close(event):
+
+Instructions for use: In terminal, run python cuff_calibration_app_v1.py
+'''
+############################################################### Imports
+
 import serial
 import sys
 import re
