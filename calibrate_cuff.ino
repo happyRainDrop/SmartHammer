@@ -1,22 +1,25 @@
 bool calibrating = false;
+bool checklights = true;
 
 // variables and constants
 const int TRIGGER_PIN = 3;
 const int TURN_ON_OSC = 2;
 const int CUFF_READ_PIN = A0;
 const int DATA_LENGTH = 200;
-const int DATA_LENGTH_DURING_PULSE = 35;
-const int NUM_PULSES_TO_SAVE = 55;
+const int DATA_LENGTH_DURING_PULSE = 42;
+const int NUM_PULSES_TO_SAVE = 78;
 const int NUM_PULSES_TO_SAVE_BEFORE_HAMMER = 5;
+const int CHECKLIGHT_PIN = 51;
+const int CALIBRATION_PIN = 23;
 
 // DELAY_LENGTH, NOP_LEN
 // 160, 16000 works pretty well (7/12/2024, 52 kHz). write HIGH --> LOW. DATA_LENGTH = 1
 // 100, 3860 works pretty well (7/15/2024, 52 kHz). write LOW --> HIGH. DATA_LENGTH = 250
 const int DELAY_LEN = 100; // number of microseconds between saveCuffData() calls
-const int NOP_LEN = 3860;
+// const int NOP_LEN = 3860; // outdated
 
-float cuff_data[DATA_LENGTH * NUM_PULSES_TO_SAVE];  // units: V
-float cuff_times[DATA_LENGTH * NUM_PULSES_TO_SAVE];        // units: ms
+unsigned short cuff_data[DATA_LENGTH * NUM_PULSES_TO_SAVE];  // units: V
+unsigned int cuff_times[DATA_LENGTH * NUM_PULSES_TO_SAVE];        // units: ms
 
 
 int curr_data_it = 0;
@@ -51,6 +54,11 @@ void setup() {
     Serial.begin(115200);
     pinMode(TURN_ON_OSC, OUTPUT);
     pinMode(TRIGGER_PIN, INPUT);
+    pinMode(CALIBRATION_PIN, INPUT);
+    if (checklights) {
+      pinMode(CHECKLIGHT_PIN, OUTPUT);
+      digitalWriteFast(CHECKLIGHT_PIN, HIGH);
+    }
 }
 
 void saveCuffData() {
@@ -60,6 +68,7 @@ void saveCuffData() {
 
     // DIGITAL WRITE PULSE
     digitalWriteFast(TURN_ON_OSC, LOW);
+    if (checklights) digitalWriteFast(CHECKLIGHT_PIN, HIGH);
     /*
     for (int i = 0; i < NOP_LEN; i++) {
       __asm__ __volatile__ ("nop\n\t");
@@ -68,6 +77,7 @@ void saveCuffData() {
       cuff_data[curr_data_it * DATA_LENGTH + i] = analogRead(CUFF_READ_PIN);  // read the input pin
     }
     digitalWriteFast(TURN_ON_OSC, HIGH);
+    if (checklights) digitalWriteFast(CHECKLIGHT_PIN, LOW);
 
     for (int i = DATA_LENGTH_DURING_PULSE; i < DATA_LENGTH; i++) {
       cuff_data[curr_data_it * DATA_LENGTH + i] = analogRead(CUFF_READ_PIN);  // read the input pin
@@ -84,13 +94,9 @@ void saveCuffData() {
 }
 
 void printCuffData() {
-  // adjust cuff_times correctly
-      /*
-    for (int i = 0; i < DATA_LENGTH; i++) {
-      cuff_times[curr_data_it * DATA_LENGTH + i] = i * 1.0 * mytime / (1000.0*DATA_LENGTH) + analogReadStartTime; // in ms
-    } */
-
   int num_pulses_to_save = calibrating ? 1 : NUM_PULSES_TO_SAVE;
+  float time_to_print = 0;
+  float voltage_to_print = 0;
 
   // It's time for us to print data
   int i_initial = start_data_it * DATA_LENGTH;
@@ -114,23 +120,23 @@ void printCuffData() {
       }
 
       int i_within_it = i % DATA_LENGTH; 
-      cuff_times[i % arr_len] = ((i_within_it*1.0*(it_end-it_start))/(DATA_LENGTH-1.0))/1000.0 
+      time_to_print = ((i_within_it*1.0*(it_end-it_start))/(DATA_LENGTH-1.0))/1000.0 
                                 + (it_start-pulseTriggeredTime)/1000.0; 
                                 // in ms
-      
-      // convert the data to voltages
-      cuff_data[i % arr_len] *= 3.3/1024.0;
+      voltage_to_print = cuff_data[i % arr_len] * 3.3/1024.0;
 
       // Print values
-      Serial.print(cuff_times[i % arr_len], 6); // prints time rel to trigger (time 0)
-      Serial.print(", ");
-      Serial.println(cuff_data[i % arr_len], 3);
+      Serial.print(time_to_print, 6); // prints time rel to trigger (time 0)
+      Serial.print(F(", "));
+      Serial.println(voltage_to_print, 3);
 
       last_it = which_it;
   }
 }
 
 void loop() {
+  calibrating = (digitalRead(CALIBRATION_PIN) == LOW);
+
   if (calibrating) {
     // save the time and stop reading
     pulseTriggeredTime = micros();
@@ -156,7 +162,7 @@ void loop() {
 
         // lastly, print the data.
         printCuffData();
-        Serial.println("==============");
+        Serial.println(F("=============="));
         delay(1000); // wait 1 second before checking for another pulse
 
     } else {
