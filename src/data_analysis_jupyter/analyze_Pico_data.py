@@ -14,8 +14,10 @@ Table of contents:
             Returns envelope of data
         find_outliers_std(data, threshold=3):
             Used to set color limits on heat maps and axis limits on gif
+        sum_signals(times1, voltages1, times2, voltages2):
+            Sums two time-varying 1D signals
     Functions to analyze cuff data:
-        get_reshaped_arrays(all_csv_data, col_indexes, skip_first_pulse = False):
+        get_reshaped_arrays(all_csv_data, col_indexes):
             Outputs 2D array for cuff heatmap, as well as other processing information for other functions to use.
         get_phase_arrays(all_csv_data, col_indexes):
             Used to analyze phase shift of the signal over slow time. Not used currently
@@ -26,7 +28,7 @@ Table of contents:
             Plots heat map of given 2D array, displays it, allows user to search for a maximum, and saves it to specified location
         get_gif(all_csv_data, col_indexes, save_as_mp4 = True, plot_hammer = False, plot_circuit_envelope = True, plot_calculated_envelope = True, compare_contraction = False, active_recieved_pulses_filtered = None, file_folder_name = "", specific_file_name = ""):
             Plot the recieved pulses over time as a GIF or mp4
-        plot_2d(input_file_array, legends, use_integral = True, use_calculated_env = True, folder="", title="fig"):
+        plot_2d(input_file_array, legends, use_integral = True, use_calculated_env = True, use_abs = True, folder="", title="fig"):
             Plots a heatmap as a single line (the line being the intergal or average of each pulse.)
 
 Instructions for use: 
@@ -52,7 +54,7 @@ import matplotlib.gridspec as gridspec
 from matplotlib.widgets import RectangleSelector
 from matplotlib.animation import FuncAnimation, PillowWriter, FFMpegWriter
 from scipy.ndimage import gaussian_filter1d
-
+from scipy.interpolate import interp1d
 
 ####################################################################################################### Helper fns
 
@@ -166,9 +168,30 @@ def find_outliers_std(data, threshold=3):
     
     return lower_outliers, upper_outliers, lower_bound, upper_bound
 
+def sum_signals(times1, voltages1, times2, voltages2):
+    # Step 1: Find the common time range
+    start_time = max(times1[0], times2[0])
+    end_time = min(times1[-1], times2[-1])
+    
+    # Create a common time array with enough resolution (adjust as needed)
+    common_times = np.linspace(start_time, end_time, num=500)  # Change num for resolution
+
+    # Step 2: Interpolate voltages for both signals at common time points
+    interp_voltages1 = interp1d(times1, voltages1, kind='linear', bounds_error=False, fill_value=0)
+    interp_voltages2 = interp1d(times2, voltages2, kind='linear', bounds_error=False, fill_value=0)
+    
+    # Resample both signals at the common time points
+    voltages1_resampled = interp_voltages1(common_times)
+    voltages2_resampled = interp_voltages2(common_times)
+    
+    # Step 3: Sum the voltages
+    summed_voltages = voltages1_resampled + voltages2_resampled
+    
+    return common_times, summed_voltages
+
 ####################################################################################################### Processing functions
 
-def get_reshaped_arrays(all_csv_data, col_indexes, skip_first_pulse = False):
+def get_reshaped_arrays(all_csv_data, col_indexes):
     '''
     Outputs 2D array for cuff heatmap, as well as other processing information for other functions to use. \n
 
@@ -177,10 +200,6 @@ def get_reshaped_arrays(all_csv_data, col_indexes, skip_first_pulse = False):
     - col_indexes: Tells us which column in your CSV corresponds to what data collected from oscilloscope. \n
     \t col_indexes = [times_col_index, hammer_index, transmit_col_index, recieve_col_index, circuit_col_index, emg_col_index = 1]
     (It tells us which column of the CSV corresponds to times, to hammer, to cuff, etc)
-    - skip_first_pulse: Set this true to skip the first pulse we see.
-                    **Basically, this only needs to be set True if you plot the heatmap and it just looks like horizontal stripes.**
-                    (it means that the first pulse we found was actually the middle of a set of pulses, so we need to skip it
-                    and start from the next set of transmit pulses for the reshaping.)
 
     Return: hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, circuit_env_reshaped, time_ticks, NUM_PULSES
     In each reshaped array: one row is one pulse. Reshaped arrays are 2D and all other arrays are 1D.
@@ -191,6 +210,8 @@ def get_reshaped_arrays(all_csv_data, col_indexes, skip_first_pulse = False):
     '''
     use_raw_envelope = False
     keep_raw_data = True
+    SQUARE_PULSES_EXPECTED = 10
+    LENGTH_ONE_SQUARE_PULSE_MS = 1000.0/52000
 
     csv_times = all_csv_data[:,col_indexes[0]]
     csv_square_pulses = all_csv_data[:,col_indexes[2]]
@@ -213,7 +234,7 @@ def get_reshaped_arrays(all_csv_data, col_indexes, skip_first_pulse = False):
 
     #####################################################  get reshaping scheme from transmit pulse
     total_start_indicies =  []
-    i = 600 if skip_first_pulse else 0
+    i = 0
     r = 0
     tr = -5
     max_pulse_length_in_indicies = 0
@@ -224,10 +245,24 @@ def get_reshaped_arrays(all_csv_data, col_indexes, skip_first_pulse = False):
             if (r > 0):
                 max_pulse_length_in_indicies = max(max_pulse_length_in_indicies, total_start_indicies[r] - total_start_indicies[r-1])
             r += 1
-            i += 500
+            i += int((LENGTH_ONE_SQUARE_PULSE_MS * (SQUARE_PULSES_EXPECTED + 1))/dt)     # skip to next pulse burst
         i+=1
     # print(max_pulse_length_in_indicies)
     NUM_PULSES = r
+
+    # Check if we should skip the first pulse
+    first_pulse = csv_square_pulses[total_start_indicies[0]:total_start_indicies[1]]
+    peaks_found = 0
+    i = 0
+    while i < len(first_pulse) - 1:
+        if (first_pulse[i] < tr and first_pulse[i+1] >= tr):
+            peaks_found += 1
+            i += int((LENGTH_ONE_SQUARE_PULSE_MS * 0.6)/dt)     # skip to next square
+        i+=1
+    if peaks_found < 10: 
+        total_start_indicies.remove(total_start_indicies[0])
+        NUM_PULSES -= 1
+
 
     #################################### Reshaped arrays . shorter pulses padded with the last data point.
     times_reshaped = np.zeros((NUM_PULSES, max_pulse_length_in_indicies))
@@ -402,7 +437,7 @@ def plot_heat_map(input_files, folder_path = "", png_name = "", stddev = 3, use_
 
     Inputs:
     - input_files: Same format as output of get_reshaped_arrays.
-        hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, circuit_env_reshaped, time_ticks, NUM_PULSES
+        hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, circuit_env_reshaped, calculated_envelope_reshaped, time_ticks, NUM_PULSES
     - folder_path: Folder to save heatmap in. Must NOT end in "/". If it and png_name are blank, image will not be saved.
     - png_name: Name of image to save heatmap in. If it and folder_path are blank, image will not be saved.
     - stddev: How many standard deviations from the mean will be considered an outlier. Outliers determine the color limits
@@ -516,6 +551,7 @@ def plot_heat_map(input_files, folder_path = "", png_name = "", stddev = 3, use_
     min_reflex_index_within_pulse = 30
     reflex_time = 0
     max_amplitude_heat_map = 0
+    # print(f"NUM_PULSES: {NUM_PULSES}")
     for r in range(NUM_PULSES):
         for c in range(min_reflex_index_within_pulse, len(cuff_recieved_reshaped[r])):
             amplitude_diff = cuff_recieved_reshaped[r][c] - cuff_recieved_reshaped[0][c]
@@ -595,7 +631,7 @@ def get_gif(all_csv_data, col_indexes, save_as_mp4 = True, plot_hammer = False, 
     print(f"Saved at: {save_place}")
     plt.show()
 
-def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env = True, folder="", title="fig"):
+def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env = True, use_abs = True, folder="", title="fig"):
     '''
     Plots a heatmap as a single line (the line being the intergal or average of each pulse.)
 
@@ -604,16 +640,24 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
      - legends: Titles of the plots to save
      - use_integral: True to use integral, false to use average. Doesn't really matter because both calculate the sum of the abs of each pulse anyways.
      - use_calculated_env: True to analyze the pulses from the calculated env, false to analyze the pulses from the circuit env
+     - use_abs: True to nomalize to first pulse and sum the absolute differences of the pulses. False to just sum each pulse.
      - folder: Location to save images in. Do not end in "/"
      - title: Name of figure to save.
 
      Ouputs:
      - Lineplots for each file in input_file_array, saved to specified location.
     '''
-    times_arr = []
-    lines_arr = []
+    total_sum_signal_times = []
+    total_sum_signal_voltages = []
     i = 0
+    ignore_start_of_pulse = False
     
+    # Find y-limit
+    abs_max = 0
+    abs_min = 100000000
+
+    # Loop over each trial to get the averages/variances
+    trial_maximum_times = []
     for input_files in input_file_array:
         hammer_times = input_files[0]
         hammer_recieved = input_files[1]
@@ -625,59 +669,100 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
         time_ticks = input_files[7]
         NUM_PULSES = input_files[8]
 
-        dt = np.mean(np.diff(hammer_times))
-
+        # Getting the lines
         arr_of_interest = calculated_envelope_reshaped if use_calculated_env else circuit_env_reshaped
         these_times = []
         these_lines = []
+            # Average each pulse
         for r in range(NUM_PULSES):
-            these_times.append(cuff_times_reshaped[r,0])
-            if use_integral: these_lines.append(np.sum(arr_of_interest[r])*dt)
-            else: these_lines.append(np.average(arr_of_interest[r]))
+
+            # Get pulses
+            pulse_of_interest = arr_of_interest[r]
+            times_of_interest = cuff_times_reshaped[r]
+            dt = np.mean(np.diff(times_of_interest))
+            these_times.append(times_of_interest[0])
+
+            # Slice off the beginning of the pulse
+            noise_border_index = 0
+            if (ignore_start_of_pulse):
+                noise_border = 0.2 # Only look at the part of the pulse after this time in ms in the pulse
+                noise_border_index = np.searchsorted(times_of_interest, noise_border + times_of_interest[0], side='right')
+                times_of_interest = times_of_interest[noise_border_index:]
+                pulse_of_interest = pulse_of_interest[noise_border_index:]
+
+            if use_abs: pulse_of_interest = np.abs(pulse_of_interest - arr_of_interest[0][noise_border_index:])
+
+            if use_integral: these_lines.append(np.sum(pulse_of_interest)*dt)
+            else: these_lines.append(np.average(pulse_of_interest))
+
+        # Finding y limits
+        abs_max = max(abs_max, np.max(these_lines))
+        abs_min = min(abs_min, np.min(these_lines))
+
+        # Smoothen and find maximum
+        start_border, end_border = 50, 200 # ms to look for maximum of contraction in
+        start_time_index = np.searchsorted(these_times, start_border, side='right')
+        end_time_index = np.searchsorted(these_times, end_border, side='left')-1
         
-        times_arr.append(np.asarray(these_times))
+        these_lines = gaussian_filter1d(these_lines, sigma=1)
+        max_index = np.argmax(these_lines[start_time_index:end_time_index]) + start_time_index
+        trial_maximum_times.append(these_times[max_index])
+
+        # Plot each individual trial and its maximum
         plt.plot(these_times, these_lines, label = legends[i])
-        plt.ylim(0, 50)
+        plt.plot(these_times[max_index], these_lines[max_index], 'ro')
+        plt.text(these_times[max_index], these_lines[max_index], f'Max {these_times[max_index]:.2f} ms,\n {these_lines[max_index]:.2f} mV', fontsize=6, ha='right', va='top')
         plt.xlabel("Time since hammer hit (ms)")
         plt.ylabel("Voltage (mV)")
         plt.title("Integral of each pulse over time")
-
-        if len(lines_arr) == 0: lines_arr = np.asarray(these_lines)
+        
+        # Sum
+        if len(total_sum_signal_voltages) == 0: 
+            total_sum_signal_times = these_times
+            total_sum_signal_voltages = these_lines
         else: 
-            lines_arr = np.add(np.asarray(these_lines[:min(len(these_lines), len(lines_arr))]), 
-                                 np.asarray(lines_arr[:min(len(these_lines), len(lines_arr))]))
+            total_sum_signal_times, total_sum_signal_voltages = sum_signals(total_sum_signal_times, total_sum_signal_voltages, these_times, these_lines)
         i+=1
-    
-    variance_signal = np.round(np.var(lines_arr, axis=0), 2)
-    save_path = folder + "/" + title + "_individual_variance_"+str(variance_signal)+".png"
+
+    # Save the image of all the overlayed trials.
+    plt.legend()
+    # variance_signal = np.round(np.var(total_sum_signal_voltages, axis=0), 2)
+    variance_signal = np.round(np.std(trial_maximum_times), 2)
+    save_path = folder + "/" + title + "_stddev_"+str(variance_signal)+"ms.png"
     plt.savefig(save_path)
     print("Saving to "+save_path)
-    plt.ylim(20, 40)
+    plt.ylim(abs_min, abs_max)
     plt.show()
 
-    # To account for different lengths
-    times_cut = times_arr[0][:min(len(times_arr[0]), len(lines_arr))]
-    lines_cut =  (lines_arr/(1.0*len(times_arr)))[:min(len(times_arr[0]), len(lines_arr))] 
-    lines_cut = gaussian_filter1d(lines_cut, sigma=1)
-    peaks, _ = find_peaks(lines_cut, distance=20)
-    valleys, _ = find_peaks(-1*lines_cut, distance=20)
+    # For shifting the text of points so they don't overlap.
+    x_offset = 1  # Adjust the horizontal shift (right)
+    y_offset = (abs_max - abs_min)/10.0  # Adjust the vertical shift (up)
+
+    # Filtering to smooth the signal
+    total_sum_signal_voltages = gaussian_filter1d(total_sum_signal_voltages, sigma=1)/len(input_file_array)
+
+    # Peaks and valleys of the "total"
+    dt = np.mean(np.diff(total_sum_signal_times)) # in ms
+    min_dist_btw_peaks_in_ms = 50
+    peaks, _ = find_peaks(total_sum_signal_voltages, distance=min_dist_btw_peaks_in_ms/dt)
+    valleys, _ = find_peaks(-1*total_sum_signal_voltages, distance=min_dist_btw_peaks_in_ms/dt)
 
     # Plot
-    plt.plot(times_cut, lines_cut)
-    plt.ylim(20, 40)
+    plt.plot(total_sum_signal_times, total_sum_signal_voltages)
+    plt.ylim(abs_min, abs_max)
     plt.xlabel("Time since hammer hit (ms)")
     plt.ylabel("Voltage (mV)")
     plt.title("Integral of each pulse over time")
 
     # Mark and label peaks (maxima)
-    plt.plot(times_cut[peaks], lines_cut[peaks], 'ro', label='Maxima')
+    plt.plot(total_sum_signal_times[peaks], total_sum_signal_voltages[peaks], 'ro', label='Maxima')
     for i in peaks:
-        plt.text(times_cut[i], lines_cut[i], f'Max {times_cut[i]:.2f} ms,\n {lines_cut[i]:.2f} mV', fontsize=6, ha='right', va='top')
+        plt.text(total_sum_signal_times[i]+x_offset, total_sum_signal_voltages[i]+y_offset, f'Max {total_sum_signal_times[i]:.2f} ms,\n {total_sum_signal_voltages[i]:.2f} mV', fontsize=6, ha='right', va='top')
 
     # Mark and label valleys (minima)
-    plt.plot(times_cut[valleys], lines_cut[valleys], 'bo', label='Minima')
+    plt.plot(total_sum_signal_times[valleys], total_sum_signal_voltages[valleys], 'bo', label='Minima')
     for i in valleys:
-        plt.text(times_cut[i], lines_cut[i], f'Min {times_cut[i]:.2f} ms,\n {lines_cut[i]:.2f} mV', fontsize=6, ha='left', va='bottom')
+        plt.text(total_sum_signal_times[i]-x_offset, total_sum_signal_voltages[i]-y_offset, f'Min {total_sum_signal_times[i]:.2f} ms,\n {total_sum_signal_voltages[i]:.2f} mV', fontsize=6, ha='left', va='bottom')
         
     save_path = folder + "/" + title + "_average.png"
     plt.savefig(save_path)
@@ -692,7 +777,7 @@ if __name__ == "__main__":
     # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Example usage: Uncomment to analyze one trial.
     ''' 
     # !!!!!!!!!!!!!!! User should edit: file_name, col_order as needed.
-    file_name = "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/hamid/Pico/hamidtrial14.csv"
+    file_name = "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_9_4_24/rachel5.csv"
     col_order = [0, 3, 4, 1, 2, 1]  # time, recieved, env, hammer, square
     # !!!!!!!!!!!!!!!
 
@@ -707,17 +792,15 @@ if __name__ == "__main__":
     my_csv = my_csv.to_numpy()
 
     # 2. Get reshaped arrays. 
-    # !!!!!!!!!!!!!! Use should make skip_first_pulse = True if the heat plot is only horizontal streaks
-    # (a sign of improper reshaping).
-    my_arr = get_reshaped_arrays(my_csv, col_order, skip_first_pulse=False)
+    my_arr = get_reshaped_arrays(my_csv, col_order)
    
     # 3. Plots! These will save in the same folder that the file you are reading is in (unless you edit file_folder_name)
     
     # Heat map of circuit envelope
-    # plot_heat_map(my_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=6, plot_circuit_env=True)
+    plot_heat_map(my_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=6, plot_circuit_env=True)
 
     # Heat map of calculated envelope
-    plot_heat_map(my_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=2.5, plot_circuit_env=False)
+    plot_heat_map(my_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=6, plot_circuit_env=False)
     
     # GIF of calculated envelope and recieved pulses.
     # get_gif(my_csv, col_order, save_as_mp4=False, plot_circuit_envelope = False, file_folder_name=file_folder_name, specific_file_name=specific_file_name)
@@ -731,21 +814,89 @@ if __name__ == "__main__":
     # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Example usage: Analyzing multiple trials in one experiment 
     # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! (2D line plot and average heatmap) 
     #'''
+
+    # SINA: 
+    # T1-T5: B1.5 (lasts ~110 ms) – Reflex starts between 60 ms and 66.81 ms
+    # T6-T10: B2 (lasts ~140 ms) – Reflex starts between 
+    # T11: B4 (lasts ~290 ms)
+    # T12-T17: B5.5 (lasts ~400 ms)
+    # T18-T22: P1 (lasts ~470 ms)
+    # T23-T27: P2 (lasts ~470 ms)
+    # T28-32: P4 (lasts ~470 ms)
+    # T33-37: P8 (lasts ~470 ms)
+    
+    box_file_names_sina_B1point5 = [
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina1.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina2.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina3.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina4.csv",
+    ]
+    box_file_names_sina_B2 = [
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina7.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina8.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina9.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina10.csv"
+    ]
+    box_file_names_sina_B5point5 = [
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina12.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina14.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina15.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina16.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina17.csv"
+    ]
+
+    pico_file_names_sina_P1 = [
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina18.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina19.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina20.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina21.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina22.csv"
+    ]
+
+    pico_file_names_sina_P2 = [
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_2ms_23.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_2ms_24.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_2ms_25.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_2ms_26.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_2ms_27.csv"
+    ]
+
+    pico_file_names_sina_P4 = [
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_4ms_28.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_4ms_29.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_4ms_30.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_4ms_31.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_4ms_32.csv"
+    ]
+
+    pico_file_names_sina_P8 = [
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_8ms_33.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_8ms_34.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_8ms_35.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_8ms_36.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_8ms_37.csv"
+    ]
+
+    # RACHEL
+    rachel_no_box_indiv = [
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t1.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t2.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t3.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t4.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t5.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t6.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t7.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t8.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t9.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t10.csv"
+    ]
     
     # !!!!!!!!!!!!!!! User should edit: legends, col_order, file_names as needed.
-    legends = ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9", "t10"]
-    col_order = [0, 2, 3, 1, 1, 1]  # time, recieved, hammer, square
-    file_names = ["src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial1.txt", 
-                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial2.txt",
-                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial3.txt",
-                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial4.txt",
-                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial5.txt",
-                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial6.txt", 
-                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial7.txt",
-                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial8.txt",
-                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial9.txt",
-                  "src/app_v1/data_from_experiments/reflex_by_subject/Pico/sophie/sophietrial10.txt"]
-    experiment_name = "sophie"
+    legends = ["T1", "T2", "T3", "T4", "T5"]
+    col_order = [0, 3, 4, 1, 2, 1]  # time, recieved, ENVELOPE, hammer, square
+    file_names = pico_file_names_sina_P4
+    experiment_name = "Exp_Summary_Sina_Pico_4ms"
+    analyze_circuit_env = False
     # !!!!!!!!!!!!!!!
 
     input_files_across_trials = []
@@ -761,19 +912,35 @@ if __name__ == "__main__":
         # Read the CSV and reshape the array.
         trial_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+").to_numpy()
         trial_arr = get_reshaped_arrays(trial_csv, col_order)
-
-        # Running sum of heatmaps across trials.
-        # The slicing is to account for the fact that sometimes the length of the arrays is off by 1.
-        if len(summed_heatmap_across_trials)==0: summed_heatmap_across_trials = np.asarray(trial_arr[5])
-        else: summed_heatmap_across_trials = np.add(summed_heatmap_across_trials[:min(len(summed_heatmap_across_trials), len(trial_arr[5]))], 
-                                   np.asarray(trial_arr[5][:min(len(summed_heatmap_across_trials), len(trial_arr[5]))]))
-
+        reshaped_array_of_interest = trial_arr[5] if analyze_circuit_env else trial_arr[6]
         input_files_across_trials.append(trial_arr)
-   
+
+        # Running sum of heatmaps (the reshaped envelopes) across trials.
+        # The slicing is to account for the fact that sometimes the length of the arrays is off by 1.
+        if len(summed_heatmap_across_trials)==0: 
+            summed_heatmap_across_trials = np.asarray(reshaped_array_of_interest)
+        else: 
+            smaller_row_length = min(len(summed_heatmap_across_trials), len(reshaped_array_of_interest)) 
+            smaller_col_length = min(len(summed_heatmap_across_trials[0]), len(reshaped_array_of_interest[0])) 
+            # print(f"HEATMAP ADDING: adding shapes {np.shape(summed_heatmap_across_trials)} to incoming shape {np.shape(reshaped_array_of_interest)}")
+            summed_heatmap_across_trials = np.add(summed_heatmap_across_trials[0:smaller_row_length,0:smaller_col_length], 
+                                   np.asarray(reshaped_array_of_interest)[0:smaller_row_length,0:smaller_col_length])
+
+    # Formatting for plot_heat_map
+    i = input_files_across_trials[0]    # Arbitrarily use the times and hammer strike from the first trial. 
+    combined_input_file = []
+    #        0             1               2                  3                     4                    5                       6                  7         8
+    #  hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, circuit_env_reshaped, calculated_env_reshaped, time_ticks, NUM_PULSES
+    if (analyze_circuit_env):
+        combined_input_file = [i[0], i[1], i[2], i[3],i[4], summed_heatmap_across_trials/len(file_names), i[6],i[7], len(summed_heatmap_across_trials)]
+    else: 
+        combined_input_file = [i[0], i[1], i[2], i[3],i[4], i[5], summed_heatmap_across_trials/len(file_names), i[7], len(summed_heatmap_across_trials)]
+
+
+    ############################################## ACTUAL PLOTTING #############################################    
     # Plot the overlayed line plots of each trial. The saved image will have the variance across lines in it.
-    # plot_2d(input_files_across_trials, legends, folder=file_folder_name, title=experiment_name)
+    plot_2d(input_files_across_trials, legends, use_abs=True, use_calculated_env=False, folder=file_folder_name, title=experiment_name)
 
     # Plot the average heatmap across all trials for this experiment.
-    i = input_files_across_trials[0]    # Arbitrarily use the times and hammer strike from the first trial. 
-    plot_heat_map([i[0], i[1], i[2], i[3], i[4], summed_heatmap_across_trials/len(file_names), i[6], i[7], i[8]], folder_path=file_folder_name, png_name=experiment_name+"_average")
+    # plot_heat_map(combined_input_file, stddev=6, plot_circuit_env=analyze_circuit_env, folder_path=file_folder_name, png_name=experiment_name+"_average")
     # '''  
