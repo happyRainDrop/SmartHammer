@@ -650,7 +650,7 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
     total_sum_signal_times = []
     total_sum_signal_voltages = []
     i = 0
-    ignore_start_of_pulse = False
+    ignore_start_of_pulse = True
     
     # Find y-limit
     abs_max = 0
@@ -673,6 +673,7 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
         arr_of_interest = calculated_envelope_reshaped if use_calculated_env else circuit_env_reshaped
         these_times = []
         these_lines = []
+        
             # Average each pulse
         for r in range(NUM_PULSES):
 
@@ -684,13 +685,15 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
 
             # Slice off the beginning of the pulse
             noise_border_index = 0
+            first_pulse = arr_of_interest[0]
             if (ignore_start_of_pulse):
                 noise_border = 0.2 # Only look at the part of the pulse after this time in ms in the pulse
                 noise_border_index = np.searchsorted(times_of_interest, noise_border + times_of_interest[0], side='right')
                 times_of_interest = times_of_interest[noise_border_index:]
                 pulse_of_interest = pulse_of_interest[noise_border_index:]
+                first_pulse = first_pulse[noise_border_index:]
 
-            if use_abs: pulse_of_interest = np.abs(pulse_of_interest - arr_of_interest[0][noise_border_index:])
+            if use_abs: pulse_of_interest = np.abs(pulse_of_interest - first_pulse)
 
             if use_integral: these_lines.append(np.sum(pulse_of_interest)*dt)
             else: these_lines.append(np.average(pulse_of_interest))
@@ -772,48 +775,10 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
 
 
 if __name__ == "__main__":
-    # REMINDER: col_index_order: col_indexes = [times, hammer, transmit, recieved, circuit_env, emg = 1]
-    
-    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Example usage: Uncomment to analyze one trial.
-    ''' 
-    # !!!!!!!!!!!!!!! User should edit: file_name, col_order as needed.
-    file_name = "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_9_4_24/rachel5.csv"
-    col_order = [0, 3, 4, 1, 2, 1]  # time, recieved, env, hammer, square
-    # !!!!!!!!!!!!!!!
 
-    # 1. Replace "infinity" signs in oscilloscope file if present, and shape into numpy dataframe.
-    very_negative_number = -100
-    very_positive_number = 100
-    file_folder_name = file_name[:file_name.rindex("/")]
-    specific_file_name = file_name[file_name.rindex("/")+1:file_name.rindex(".")]
-    my_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+")
-    my_csv.replace([float('-inf'), '-∞'], very_negative_number, inplace=True)
-    my_csv.replace([float('inf'), '∞'], very_positive_number, inplace=True)
-    my_csv = my_csv.to_numpy()
-
-    # 2. Get reshaped arrays. 
-    my_arr = get_reshaped_arrays(my_csv, col_order)
-   
-    # 3. Plots! These will save in the same folder that the file you are reading is in (unless you edit file_folder_name)
-    
-    # Heat map of circuit envelope
-    plot_heat_map(my_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=6, plot_circuit_env=True)
-
-    # Heat map of calculated envelope
-    plot_heat_map(my_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=6, plot_circuit_env=False)
-    
-    # GIF of calculated envelope and recieved pulses.
-    # get_gif(my_csv, col_order, save_as_mp4=False, plot_circuit_envelope = False, file_folder_name=file_folder_name, specific_file_name=specific_file_name)
-    
-    # 2D average map of calculated envelope.
-    # input_file_array = [my_arr]
-    # legends = [specific_file_name]
-    # plot_2d(input_file_array, legends, folder=file_folder_name, title=specific_file_name)
-    # '''
-
-    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Example usage: Analyzing multiple trials in one experiment 
-    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! (2D line plot and average heatmap) 
-    #'''
+    #####################################################################################################
+    ################                     Commonly processed files                      ##################
+    #####################################################################################################
 
     # SINA: 
     # T1-T5: B1.5 (lasts ~110 ms) – Reflex starts between 60 ms and 66.81 ms
@@ -890,12 +855,80 @@ if __name__ == "__main__":
         "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t9.csv",
         "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t10.csv"
     ]
+
+    #####################################################################################################
+    #####################################################################################################
+    #####################################################################################################
+
+    # REMINDER: col_index_order: col_indexes = [times, hammer, transmit, recieved, circuit_env, emg = 1]
+    
+    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Example usage: Uncomment to analyze one trial.
+    #''' 
+    # !!!!!!!!!!!!!!! User should edit: file_name, col_order as needed.
+    file_name = box_file_names_sina_B5point5[0]
+    col_order = [0, 3, 4, 1, 2, 1]  # time, recieved, env, hammer, square
+    # !!!!!!!!!!!!!!!
+
+    # 1. Replace "infinity" signs in oscilloscope file if present, and shape into numpy dataframe.
+    very_negative_number = -100
+    very_positive_number = 100
+    file_folder_name = file_name[:file_name.rindex("/")]
+    specific_file_name = file_name[file_name.rindex("/")+1:file_name.rindex(".")]
+    my_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+")
+    my_csv.replace([float('-inf'), '-∞'], very_negative_number, inplace=True)
+    my_csv.replace([float('inf'), '∞'], very_positive_number, inplace=True)
+    my_csv = my_csv.to_numpy()
+
+    # 2. Get reshaped arrays. 
+    my_arr = get_reshaped_arrays(my_csv, col_order)
+   
+    # 3. Plots! These will save in the same folder that the file you are reading is in (unless you edit file_folder_name)
+    
+    # Heat map of circuit envelope
+    # plot_heat_map(my_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=6, plot_circuit_env=True)
+
+    # Heat map of calculated envelope
+    plot_heat_map(my_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=6, plot_circuit_env=False)
+
+    # plot 2D
+    #'''
+    hammer_times = my_arr[0]
+    hammer_recieved = my_arr[1]
+    emg_recieved = my_arr[2]
+    cuff_times_reshaped = my_arr[3]
+    cuff_recieved_reshaped = my_arr[4]
+    circuit_env_reshaped = my_arr[5]
+    calculated_envelope_reshaped = my_arr[6]
+    time_ticks = my_arr[7]
+    NUM_PULSES = my_arr[8]
+    new_pulse_arr = []
+    new_time_arr = cuff_times_reshaped[:,0]
+    first_pulse = calculated_envelope_reshaped[0]
+    for r in range(NUM_PULSES):
+        this_pulse = calculated_envelope_reshaped[r]
+        new_pulse_arr.append(np.average(np.abs(this_pulse[150:] - first_pulse[150:])))
+    plt.plot(new_time_arr, new_pulse_arr)
+    plt.show()
+    #'''
+
+    # GIF of calculated envelope and recieved pulses.
+    # get_gif(my_csv, col_order, save_as_mp4=False, plot_circuit_envelope = False, file_folder_name=file_folder_name, specific_file_name=specific_file_name)
+    
+    # 2D average map of calculated envelope.
+    # input_file_array = [my_arr]
+    # legends = [specific_file_name]
+    # plot_2d(input_file_array, legends, folder=file_folder_name, title=specific_file_name)
+    # '''
+
+    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Example usage: Analyzing multiple trials in one experiment 
+    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! (2D line plot and average heatmap) 
+    #'''
     
     # !!!!!!!!!!!!!!! User should edit: legends, col_order, file_names as needed.
-    legends = ["T1", "T2", "T3", "T4", "T5"]
+    legends = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10"]
     col_order = [0, 3, 4, 1, 2, 1]  # time, recieved, ENVELOPE, hammer, square
-    file_names = pico_file_names_sina_P4
-    experiment_name = "Exp_Summary_Sina_Pico_4ms"
+    file_names = box_file_names_sina_B5point5
+    experiment_name = "Exp_Summary_Sina_B5.5"
     analyze_circuit_env = False
     # !!!!!!!!!!!!!!!
 
@@ -910,7 +943,10 @@ if __name__ == "__main__":
         specific_file_name = file_name[file_name.rindex("/")+1:file_name.rindex(".")]
 
         # Read the CSV and reshape the array.
-        trial_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+").to_numpy()
+        trial_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+")
+        trial_csv.replace([float('-inf'), '-∞'], -100, inplace=True)
+        trial_csv.replace([float('inf'), '∞'], 100, inplace=True)
+        trial_csv = trial_csv.to_numpy()
         trial_arr = get_reshaped_arrays(trial_csv, col_order)
         reshaped_array_of_interest = trial_arr[5] if analyze_circuit_env else trial_arr[6]
         input_files_across_trials.append(trial_arr)
@@ -939,7 +975,7 @@ if __name__ == "__main__":
 
     ############################################## ACTUAL PLOTTING #############################################    
     # Plot the overlayed line plots of each trial. The saved image will have the variance across lines in it.
-    plot_2d(input_files_across_trials, legends, use_abs=True, use_calculated_env=False, folder=file_folder_name, title=experiment_name)
+    # plot_2d(input_files_across_trials, legends, use_abs=True, use_calculated_env=True, folder=file_folder_name, title=experiment_name)
 
     # Plot the average heatmap across all trials for this experiment.
     # plot_heat_map(combined_input_file, stddev=6, plot_circuit_env=analyze_circuit_env, folder_path=file_folder_name, png_name=experiment_name+"_average")
