@@ -111,8 +111,8 @@ def get_filtered_pulses(data, Sampling_frequency, use_raw_envelope = False):
         kernel_size = 3
         return medfilt(data, kernel_size)
     else:
-        Filter_lowcut =40000
-        Filter_highcut =60000
+        Filter_lowcut = 10
+        Filter_highcut = 20000
         Filter_order = 4
         # print(f"Sampling frequency: {Sampling_frequency} Hz")
         data = np.asarray(data, dtype=float)
@@ -978,11 +978,85 @@ if __name__ == "__main__":
     # !!!!!!!!!!!!!!! User should edit: legends, col_order, file_names as needed.
     legends = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10"]
     col_order = [0, 3, 4, 1, 2, 1]  # time, recieved, ENVELOPE, hammer, square
-    file_names = hamid_indiv_long_trials
-    experiment_name = "Exp_Summary_Hamid_B5.5"
+    file_names = pico_file_names_sina_P1
+    experiment_name = "LOWPASS_Summary_Sina_P1"
     analyze_circuit_env = False
     # !!!!!!!!!!!!!!!
 
+    # plotting lowpass    
+    sig_times = []
+    hammer_sigs = []
+    lowpass_cuff_times = []
+    lowpass_cuff_sigs = []
+
+    for file_name in file_names:
+        # Get the name of file and folder the CSV is extracted from.
+        file_folder_name = file_name[:file_name.rindex("/")]
+        specific_file_name = file_name[file_name.rindex("/")+1:file_name.rindex(".")]
+
+        # Read the CSV
+        trial_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+")
+        trial_csv.replace([float('-inf'), '-∞'], -100, inplace=True)
+        trial_csv.replace([float('inf'), '∞'], 100, inplace=True)
+        trial_csv = trial_csv.to_numpy()
+
+        # extract the relevant columns
+        csv_times = trial_csv[:,col_order[0]]
+        csv_square_pulses = trial_csv[:,col_order[2]]
+        csv_recieved_pulses = trial_csv[:,col_order[3]]
+        csv_circuit_envelope =  trial_csv[:,col_order[4]]
+        csv_hammer = trial_csv[:,col_order[1]]
+
+        # lowpassing
+        dt = np.mean(np.diff(csv_times))
+        fs = 1000 / dt  # Sampling frequency
+        data = np.asarray(csv_recieved_pulses, dtype=float)
+        # lowpass_cuff_sigs.append(data)
+        
+        lowpass_cuff_sigs.append(get_filtered_pulses(csv_recieved_pulses, fs))
+        lowpass_cuff_times.append(csv_times)
+        sig_times = csv_times
+        hammer_sigs.append(get_filtered_pulses(csv_hammer, fs))
+
+    # Plot using GridSpec
+    fig = plt.figure(figsize=(6, 8))
+    gs = gridspec.GridSpec(3, 1, height_ratios=[1, 1, 0.05])
+
+    # Hammer and EMG signal subplot
+    ax1 = plt.subplot(gs[0])
+    
+    ax1.set_xlim(sig_times[0], sig_times[-1])
+    ax1.set_title("Hammer voltage vs time")
+    ax1.set_ylabel('Voltage (V)')
+    ax1.set_xlabel('Time (ms)')
+    ax1.legend()
+
+    # Cuff signal subplot
+    ax2 = plt.subplot(gs[1])
+    ax2.set_title(experiment_name)
+    ax2.set_ylabel('Voltage (mV)')
+    ax2.set_xlabel('Start time of pulse (ms)')
+    ax2.set_xlim(sig_times[0], sig_times[-1])
+
+    # Loop
+    for desired_trial_index in range(len(lowpass_cuff_times)):
+        times = lowpass_cuff_times[desired_trial_index]
+        hammer = hammer_sigs[desired_trial_index]
+        cuff = lowpass_cuff_sigs[desired_trial_index]
+        ax1.plot(times, hammer, color="blue", label="Hammer strike")
+        ax2.plot(times, cuff)
+
+        start_index_look_max = 20000
+        max_hammer_index = np.where(hammer == max(hammer[start_index_look_max:]))[0]
+        max_hammer_time = np.round(times[max_hammer_index + start_index_look_max], 2)
+        max_cuff_index = np.where(cuff == max(cuff[start_index_look_max:]))[0]
+        max_cuff_time = np.round(times[max_cuff_index + start_index_look_max], 2)
+        print(f"trial {18+desired_trial_index}: hammer peak {max_hammer_time} ms at index {max_hammer_index}, cuff peak {max_cuff_time} ms at index {max_cuff_index}, difference {max_hammer_time - max_cuff_time} ms" )
+
+    # Save the figure before showing it
+    plt.subplots_adjust(hspace=1)
+    # plt.show()
+    '''
     input_files_across_trials = []
     summed_heatmap_across_trials = []
     file_folder_name = ""
@@ -1026,8 +1100,8 @@ if __name__ == "__main__":
 
     ############################################## ACTUAL PLOTTING #############################################    
     # Plot the overlayed line plots of each trial. The saved image will have the variance across lines in it.
-    plot_2d(input_files_across_trials, legends, use_abs=True, use_calculated_env=(not analyze_circuit_env), folder=file_folder_name, title=experiment_name)
+    # plot_2d(input_files_across_trials, legends, use_abs=True, use_calculated_env=(not analyze_circuit_env), folder=file_folder_name, title=experiment_name)
 
     # Plot the average heatmap across all trials for this experiment.
-    plot_heat_map(combined_input_file, stddev=6, plot_circuit_env=analyze_circuit_env, folder_path=file_folder_name, png_name=experiment_name+"_average")
+    # plot_heat_map(combined_input_file, stddev=6, plot_circuit_env=analyze_circuit_env, folder_path=file_folder_name, png_name=experiment_name+"_average")
     # '''  
