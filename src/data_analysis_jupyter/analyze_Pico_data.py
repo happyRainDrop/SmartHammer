@@ -486,9 +486,14 @@ def plot_heat_map(input_files, folder_path = "", png_name = "", stddev = 3, use_
     ax2.set_title(title_addend+' envelope: \nPulse height vs time normalize to start of pulse, all pulses overlayed')
     ax2.set_ylabel('Array index within pulse')
     ax2.set_xlabel('Start time of pulse (ms)')
+    
     time_tick_positions = np.arange(1, NUM_PULSES, NUM_PULSES / len(time_ticks))
-    ax2.set_xticks(ticks=time_tick_positions[0::int(len(time_ticks)/10)])
-    ax2.set_xticklabels(labels=time_ticks[0::int(len(time_ticks)/10)])
+    selected_positions = time_tick_positions[0::int(len(time_ticks)/10)]
+    selected_ticks = np.round(np.asarray(time_ticks[0::int(len(time_ticks)/10)]), 2)
+    selected_positions = selected_positions[:min(len(selected_ticks), len(selected_positions))]
+    selected_ticks = selected_ticks[:min(len(selected_ticks), len(selected_positions))]
+    ax2.set_xticks(ticks=selected_positions)
+    ax2.set_xticklabels(labels=selected_ticks)
     ax2.tick_params(axis='x', rotation=90)
 
     # Colorbar subplot
@@ -650,7 +655,12 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
     total_sum_signal_times = []
     total_sum_signal_voltages = []
     i = 0
+
+    # To slice which part of the heatmap we are observing (set both to False to not slice)
     ignore_start_of_pulse = True
+    start_border_ms = 0.3 # Only look at the part of the pulse after this time in ms in the pulse
+    ignore_end_of_pulse = True
+    end_border_ms = 1.2 # Only look at the part of the pulse before this time in ms in the pulse
     
     # Find y-limit
     abs_max = 0
@@ -683,15 +693,20 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
             dt = np.mean(np.diff(times_of_interest))
             these_times.append(times_of_interest[0])
 
-            # Slice off the beginning of the pulse
-            noise_border_index = 0
+            # Slice off the beginning and end of the pulse, if desired
             first_pulse = arr_of_interest[0]
+            start_border_index = 0
             if (ignore_start_of_pulse):
-                noise_border = 0.2 # Only look at the part of the pulse after this time in ms in the pulse
-                noise_border_index = np.searchsorted(times_of_interest, noise_border + times_of_interest[0], side='right')
-                times_of_interest = times_of_interest[noise_border_index:]
-                pulse_of_interest = pulse_of_interest[noise_border_index:]
-                first_pulse = first_pulse[noise_border_index:]
+                start_border_index = np.searchsorted(times_of_interest, start_border_ms + times_of_interest[0], side='right')
+                times_of_interest = times_of_interest[start_border_index:]
+                pulse_of_interest = pulse_of_interest[start_border_index:]
+                first_pulse = first_pulse[start_border_index:]
+            end_border_index = 0
+            if (ignore_end_of_pulse):
+                end_border_index = np.searchsorted(times_of_interest, end_border_ms + times_of_interest[0], side='left')
+                times_of_interest = times_of_interest[:end_border_index]
+                pulse_of_interest = pulse_of_interest[:end_border_index]
+                first_pulse = first_pulse[:end_border_index]
 
             if use_abs: pulse_of_interest = np.abs(pulse_of_interest - first_pulse)
 
@@ -746,7 +761,7 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
 
     # Peaks and valleys of the "total"
     dt = np.mean(np.diff(total_sum_signal_times)) # in ms
-    min_dist_btw_peaks_in_ms = 50
+    min_dist_btw_peaks_in_ms = 30
     peaks, _ = find_peaks(total_sum_signal_voltages, distance=min_dist_btw_peaks_in_ms/dt)
     valleys, _ = find_peaks(-1*total_sum_signal_voltages, distance=min_dist_btw_peaks_in_ms/dt)
 
@@ -842,7 +857,7 @@ if __name__ == "__main__":
         "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_8ms_37.csv"
     ]
 
-    # RACHEL
+    ######## RACHEL
     rachel_no_box_indiv = [
         "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t1.csv",
         "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t2.csv",
@@ -856,6 +871,63 @@ if __name__ == "__main__":
         "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t10.csv"
     ]
 
+    rachel_day_1_B1point5 = [
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_1.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_2.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_3.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_4.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_5.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_6.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_7.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_8.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_9.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_10.csv",
+    ]
+
+    rachel_day_2_B1point5 = [
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel1.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel2.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel3.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel4.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel5.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel6.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel7.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel8.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel9.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel10.csv"
+    ]
+
+    rachel_day_1_B5point5 = [
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_8_30_24/rachel_long_trial_1_better.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_8_30_24/rachel_long_trial_2.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_8_30_24/rachel_long_trial_3.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_8_30_24/rachel_long_trial_4.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_8_30_24/rachel_long_trial_5.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_8_30_24/rachel_long_trial_6.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_8_30_24/rachel_long_trial_7.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_8_30_24/rachel_long_trial_8.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_8_30_24/rachel_long_trial_9.csv"
+    ]
+
+    rachel_day_2_B5point5 = [
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_9_4_24/rachel1.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_9_4_24/rachel2.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_9_4_24/rachel3.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_9_4_24/rachel4.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_9_4_24/rachel5.csv"
+    ]
+
+
+    #### HAMID
+
+    hamid_indiv_long_trials = [
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/hamid/Pico/hamidtrial11.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/hamid/Pico/hamidtrial13.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/hamid/Pico/hamidtrial14.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/hamid/Pico/hamidtrial15.csv",
+        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/hamid/Pico/hamidtrial16.csv",
+    ]
+
     #####################################################################################################
     #####################################################################################################
     #####################################################################################################
@@ -863,7 +935,7 @@ if __name__ == "__main__":
     # REMINDER: col_index_order: col_indexes = [times, hammer, transmit, recieved, circuit_env, emg = 1]
     
     # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Example usage: Uncomment to analyze one trial.
-    #''' 
+    ''' 
     # !!!!!!!!!!!!!!! User should edit: file_name, col_order as needed.
     file_name = box_file_names_sina_B5point5[0]
     col_order = [0, 3, 4, 1, 2, 1]  # time, recieved, env, hammer, square
@@ -890,27 +962,6 @@ if __name__ == "__main__":
     # Heat map of calculated envelope
     plot_heat_map(my_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=6, plot_circuit_env=False)
 
-    # plot 2D
-    #'''
-    hammer_times = my_arr[0]
-    hammer_recieved = my_arr[1]
-    emg_recieved = my_arr[2]
-    cuff_times_reshaped = my_arr[3]
-    cuff_recieved_reshaped = my_arr[4]
-    circuit_env_reshaped = my_arr[5]
-    calculated_envelope_reshaped = my_arr[6]
-    time_ticks = my_arr[7]
-    NUM_PULSES = my_arr[8]
-    new_pulse_arr = []
-    new_time_arr = cuff_times_reshaped[:,0]
-    first_pulse = calculated_envelope_reshaped[0]
-    for r in range(NUM_PULSES):
-        this_pulse = calculated_envelope_reshaped[r]
-        new_pulse_arr.append(np.average(np.abs(this_pulse[150:] - first_pulse[150:])))
-    plt.plot(new_time_arr, new_pulse_arr)
-    plt.show()
-    #'''
-
     # GIF of calculated envelope and recieved pulses.
     # get_gif(my_csv, col_order, save_as_mp4=False, plot_circuit_envelope = False, file_folder_name=file_folder_name, specific_file_name=specific_file_name)
     
@@ -927,8 +978,8 @@ if __name__ == "__main__":
     # !!!!!!!!!!!!!!! User should edit: legends, col_order, file_names as needed.
     legends = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10"]
     col_order = [0, 3, 4, 1, 2, 1]  # time, recieved, ENVELOPE, hammer, square
-    file_names = box_file_names_sina_B5point5
-    experiment_name = "Exp_Summary_Sina_B5.5"
+    file_names = hamid_indiv_long_trials
+    experiment_name = "Exp_Summary_Hamid_B5.5"
     analyze_circuit_env = False
     # !!!!!!!!!!!!!!!
 
@@ -975,8 +1026,8 @@ if __name__ == "__main__":
 
     ############################################## ACTUAL PLOTTING #############################################    
     # Plot the overlayed line plots of each trial. The saved image will have the variance across lines in it.
-    # plot_2d(input_files_across_trials, legends, use_abs=True, use_calculated_env=True, folder=file_folder_name, title=experiment_name)
+    plot_2d(input_files_across_trials, legends, use_abs=True, use_calculated_env=(not analyze_circuit_env), folder=file_folder_name, title=experiment_name)
 
     # Plot the average heatmap across all trials for this experiment.
-    # plot_heat_map(combined_input_file, stddev=6, plot_circuit_env=analyze_circuit_env, folder_path=file_folder_name, png_name=experiment_name+"_average")
+    plot_heat_map(combined_input_file, stddev=6, plot_circuit_env=analyze_circuit_env, folder_path=file_folder_name, png_name=experiment_name+"_average")
     # '''  
