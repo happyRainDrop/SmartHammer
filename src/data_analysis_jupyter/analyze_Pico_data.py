@@ -86,11 +86,8 @@ def find_maxima_envelope(signal, sampling_rate, approx_frequency):
     return envelope
 
 def butter_lowpass_filter(data, cutOff, fs, order=4):
-    def butter_lowpass(cutOff, fs, order=5):
-        nyq = 0.5 * fs
-        normalCutoff = cutOff / nyq
-        b, a = butter(order, normalCutoff, btype='low', analog = True)
-        return b, a
+    def butter_lowpass(cutoff, fs, order=5):
+        return butter(order, cutoff, fs=fs, btype='low', analog=False)
     
     b, a = butter_lowpass(cutOff, fs, order=order)
     y = lfilter(b, a, data)
@@ -129,7 +126,21 @@ def get_filtered_pulses(data, Sampling_frequency, use_raw_envelope = False, filt
             sos = butter(Filter_order, [Filter_lowcut, Filter_highcut], btype='bandpass', fs=Sampling_frequency, output='sos')
             return np.apply_along_axis(lambda x: sosfilt(sos, x), axis=0, arr = data)
         else:
-            return butter_lowpass_filter(data, cutOff=Filter_highcut, fs=Sampling_frequency, order=Filter_order)
+            window_size_ms = 0.5
+            dt = 1000/Sampling_frequency   # in ms
+            window_size = int(window_size_ms/dt)
+            # Ensure the window size is odd (required for median filter)
+            if window_size % 2 == 0:
+                window_size += 1
+            lowpass = medfilt(data, window_size)
+            
+            '''
+            plt.plot(np.arange(len(data)), data)
+            plt.plot(np.arange(len(lowpass)), lowpass)
+            print(f"filtered data length {len(lowpass)}, versus original {len(data)}")
+            plt.show()
+            '''
+            return lowpass
 
 def get_envelope(data, use_raw_envelope = False):
     '''
@@ -233,7 +244,8 @@ def get_reshaped_arrays(all_csv_data, col_indexes, filter_freqs = [40000, 60000]
     - cuff_recieved_reshaped, circuit_env_reshaped: Filtered recieved pulses and circuit envelope pulses reshaped, respectively.
     - time_ticks: Start time of each pulse (1D array)
     '''
-    use_raw_envelope = False    # If False, Hilbert envelope, if True, maxima envelope     
+    use_raw_envelope = False if filter_freqs[1] < 1000000 else True   # If False, Hilbert envelope, if True, maxima envelope 
+                                                                    # Maxima envelope should be used for unfiltered signal    
     
     # This is dependent on the system, and used to organize where each recieved pulse begins and ends
     SQUARE_PULSES_EXPECTED = 10
@@ -707,7 +719,7 @@ def plot_heat_map_fourier(input_files, folder_path = "", png_name = "", stddev =
     ax2 = plt.subplot(gs[1])
     cuff_vals_for_heatmap = fft_arr
     lower_lim_imshow = 0
-    upper_lim_imshow = 20000
+    upper_lim_imshow = 2000
     im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim_imshow)
     ax2.set_title("Calculated FFT")
     
@@ -919,7 +931,7 @@ def get_fourier_gif(input_files, col_indexes, save_as_mp4 = True, in_ms = True, 
     print(f"Saved at: {save_place}")
     plt.show()
     
-def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env = True, use_abs = True, folder="", title="fig", in_ms = True):
+def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env = True, use_abs = True, folder="", title="fig", in_ms = True, comparing_filters = False):
     '''
     Plots a heatmap as a single line (the line being the intergal or average of each pulse.)
 
@@ -945,14 +957,18 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
     start_border_ms = 0.3 # Only look at the part of the pulse after this time in ms in the pulse
     ignore_end_of_pulse = True
     end_border_ms = 1.2 # Only look at the part of the pulse before this time in ms in the pulse
-    
+    if (not in_ms):
+        start_border_ms *= 0.001
+        end_border_ms *= 0.001
+        
     # Find y-limit
     abs_max = 0
     abs_min = 100000000
 
     # Loop over each trial to get the averages/variances
     trial_maximum_times = []
-    for input_files in input_file_array:
+    for i in range(len(input_file_array)):
+        input_files = input_file_array[i]
         hammer_times = input_files[0]
         hammer_recieved = input_files[1]
         emg_recieved = input_files[2]
@@ -992,7 +1008,9 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
                 pulse_of_interest = pulse_of_interest[:end_border_index]
                 first_pulse = first_pulse[:end_border_index]
 
-            if use_abs: pulse_of_interest = np.abs(pulse_of_interest - first_pulse)
+            if use_abs: # and (not (comparing_filters)): 
+                # Do NOT normalize to first "pulse" for the lowpassed thing
+                pulse_of_interest = np.abs(pulse_of_interest - first_pulse)
 
             if use_integral: these_lines.append(np.sum(pulse_of_interest)*dt)
             else: these_lines.append(np.average(pulse_of_interest))
@@ -1135,7 +1153,7 @@ def analyze_one_trial(file_name, col_order, plot_circuit_envelope):
         # 2D plot comparing 3 types of filtering
         legends = ["lowpassed", "bandpassed", "unfiltered"]
         input_file_array = [lowpassed_reshaped_arr, regular_reshaped_arr, unfiltered_reshaped_arr]
-        plot_2d(input_file_array, legends, folder=file_folder_name, title=specific_file_name, use_calculated_env=True)
+        plot_2d(input_file_array, legends, folder=file_folder_name, title=specific_file_name, use_calculated_env=True, comparing_filters = True)
 
     # GIF
     # get_fourier_gif(regular_reshaped_arr, col_order, save_as_mp4=False, file_folder_name=file_folder_name, specific_file_name=specific_file_name)
@@ -1155,15 +1173,15 @@ def summary_of_trials(file_names, col_order, experiment_name, analyze_circuit_en
     summed_heatmap_across_trials = []
     file_folder_name = ""
 
-    time_unit = check_time_unit(file_name)
-    print(time_unit)
-    in_ms = time_unit == "(ms)"
-
     # Loop through each file in the folder provided, extracting the heatmap array from each one.
     for file_name in file_names:
         # Get the name of file and folder the CSV is extracted from.
         file_folder_name = file_name[:file_name.rindex("/")]
         specific_file_name = file_name[file_name.rindex("/")+1:file_name.rindex(".")]
+
+        # Some of the longer files will have the time unit as seconds, not ms, so check this.
+        time_unit = check_time_unit(file_name)
+        in_ms = time_unit == "(ms)"
 
         # Read the CSV and reshape the array.
         trial_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+")
