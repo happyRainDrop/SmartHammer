@@ -55,6 +55,7 @@ from matplotlib.widgets import RectangleSelector
 from matplotlib.animation import FuncAnimation, PillowWriter, FFMpegWriter
 from scipy.ndimage import gaussian_filter1d
 from scipy.interpolate import interp1d
+from scipy.signal import decimate
 
 ####################################################################################################### Helper fns
 
@@ -95,29 +96,40 @@ def butter_lowpass_filter(data, cutOff, fs, order=4):
     y = lfilter(b, a, data)
     return y
 
-def get_filtered_pulses(data, Sampling_frequency, use_raw_envelope = False):
+def get_filtered_pulses(data, Sampling_frequency, use_raw_envelope = False, filter_frequencies = [40000, 60000]):
     '''
     Filters the inputted signal.
 
     Inputs:
     - data: array of voltages of the signal to filter
     - Sampling frequency: How many Hz data was sampled at
-    - use_raw_envelope: If true, do median filtering, otherwise do bandpass filter.
+    - filter_frequencies: Frequencies the bandpass filter keeps.
+    - use_raw_envelope: If true, do median filtering, otherwise do bandpass/lowpass filter.
 
     Outputs:
     - Array of filtered voltages.
     '''
+
+    lower_border = 10           # if filter_frequencies[0] < lower_border, it's a lowpass 
+    higher_border = 1000000     # if filter_frequencies[1] > higher_border, do not filter.
+
     if (use_raw_envelope):
         kernel_size = 3
         return medfilt(data, kernel_size)
     else:
-        Filter_lowcut = 10
-        Filter_highcut = 20000
-        Filter_order = 4
-        # print(f"Sampling frequency: {Sampling_frequency} Hz")
+        Filter_lowcut = filter_frequencies[0]
+        Filter_highcut = filter_frequencies[1]
+        Filter_order = 4        # not really sure what this is.
+        
         data = np.asarray(data, dtype=float)
-        sos = butter(Filter_order, [Filter_lowcut, Filter_highcut], btype='bandpass', fs=Sampling_frequency, output='sos')
-        return np.apply_along_axis(lambda x: sosfilt(sos, x), axis=0, arr = data)
+
+        if filter_frequencies[1] > higher_border: return data    # no filtering.
+
+        if filter_frequencies[0] > lower_border:
+            sos = butter(Filter_order, [Filter_lowcut, Filter_highcut], btype='bandpass', fs=Sampling_frequency, output='sos')
+            return np.apply_along_axis(lambda x: sosfilt(sos, x), axis=0, arr = data)
+        else:
+            return butter_lowpass_filter(data, cutOff=Filter_highcut, fs=Sampling_frequency, order=Filter_order)
 
 def get_envelope(data, use_raw_envelope = False):
     '''
@@ -153,6 +165,8 @@ def find_outliers_std(data, threshold=3):
     - lower_bound: Smallest number that is not an outlier
     - upper_bound: Largerst number that is not an outlier
     '''
+    # Ensure data is a NumPy array
+    data = np.asarray(data)
 
     # Calculate the mean and standard deviation
     mean = np.mean(data)
@@ -189,9 +203,19 @@ def sum_signals(times1, voltages1, times2, voltages2):
     
     return common_times, summed_voltages
 
+def check_time_unit(csv_file_name):
+    '''
+    Check if the time units of our CSV is in ms or seconds. 
+    Returns time unit as string "(ms)" or "(s)"
+    '''
+
+    df = pd.read_csv(csv_file_name, nrows=2, sep=',' if file_name[-1]=="v" else "\s+")  # Read only the first two rows
+    time_unit = df.iloc[0,0]  # Get the unit from the second row
+    return time_unit
+
 ####################################################################################################### Processing functions
 
-def get_reshaped_arrays(all_csv_data, col_indexes):
+def get_reshaped_arrays(all_csv_data, col_indexes, filter_freqs = [40000, 60000], in_ms = True, keep_raw_data = True):
     '''
     Outputs 2D array for cuff heatmap, as well as other processing information for other functions to use. \n
 
@@ -200,7 +224,8 @@ def get_reshaped_arrays(all_csv_data, col_indexes):
     - col_indexes: Tells us which column in your CSV corresponds to what data collected from oscilloscope. \n
     \t col_indexes = [times_col_index, hammer_index, transmit_col_index, recieve_col_index, circuit_col_index, emg_col_index = 1]
     (It tells us which column of the CSV corresponds to times, to hammer, to cuff, etc)
-
+    - keep_raw_data: If False, in the output, cuff_recieved_reshaped is the filtered pulses reshaped. If True, it is the raw pulses reshaped
+                    Usually only set to False for when we're lowpassing (when we want cuff_recieved_reshaped to be the lowpassed signal)
     Return: hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, circuit_env_reshaped, time_ticks, NUM_PULSES
     In each reshaped array: one row is one pulse. Reshaped arrays are 2D and all other arrays are 1D.
     - hammer_times, hammer_recieved, emg: Times and voltages of the hammer and EMG signal from the CSV.
@@ -208,11 +233,13 @@ def get_reshaped_arrays(all_csv_data, col_indexes):
     - cuff_recieved_reshaped, circuit_env_reshaped: Filtered recieved pulses and circuit envelope pulses reshaped, respectively.
     - time_ticks: Start time of each pulse (1D array)
     '''
-    use_raw_envelope = False
-    keep_raw_data = True
+    use_raw_envelope = False    # If False, Hilbert envelope, if True, maxima envelope     
+    
+    # This is dependent on the system, and used to organize where each recieved pulse begins and ends
     SQUARE_PULSES_EXPECTED = 10
     LENGTH_ONE_SQUARE_PULSE_MS = 1000.0/52000
-
+    
+    # Extract CSV information.
     csv_times = all_csv_data[:,col_indexes[0]]
     csv_square_pulses = all_csv_data[:,col_indexes[2]]
     csv_recieved_pulses = all_csv_data[:,col_indexes[3]]
@@ -221,12 +248,13 @@ def get_reshaped_arrays(all_csv_data, col_indexes):
     emg_recieved = all_csv_data[:, col_indexes[5]]
 
     dt = np.mean(np.diff(csv_times))
-    fs = 1000 / dt  # Sampling frequency
+    if (not in_ms): dt = dt*1000   # Convert seconds to ms
+    fs = 1000 / dt # Sampling frequency, Hz
     ############################################
 
     hammer_times, hammer_recieved = csv_times, csv_hammer
 
-    filtered_recieved_pulses = get_filtered_pulses(csv_recieved_pulses, fs, use_raw_envelope)
+    filtered_recieved_pulses = get_filtered_pulses(csv_recieved_pulses, fs, use_raw_envelope, filter_frequencies=filter_freqs)
     calculated_envelope = get_envelope(filtered_recieved_pulses, use_raw_envelope)
     if (keep_raw_data): filtered_recieved_pulses = csv_recieved_pulses
 
@@ -347,7 +375,7 @@ def get_phase_arrays(all_csv_data, col_indexes):
     show_recieved_fft_plot = False
 
     dt = np.mean(np.diff(csv_times))
-    fs = 1000 / dt  # Sampling frequency
+    fs = 1000 / dt  # Sampling frequency, in Hz
 
     # Compute FFT
     fft_values = np.fft.fft(csv_recieved_pulses)
@@ -431,7 +459,7 @@ def get_phase_arrays(all_csv_data, col_indexes):
 
 # Plots
 
-def plot_heat_map(input_files, folder_path = "", png_name = "", stddev = 3, use_emg = False, plot_circuit_env = False):
+def plot_heat_map(input_files, folder_path = "", png_name = "", stddev = 3, use_emg = False, plot_circuit_env = False, in_ms = True):
     '''
     Plots heat map of given 2D array, displays it, allows user to search for a maximum, and saves it to specified location.\n
 
@@ -485,7 +513,7 @@ def plot_heat_map(input_files, folder_path = "", png_name = "", stddev = 3, use_
     im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim_imshow)
     ax2.set_title(title_addend+' envelope: \nPulse height vs time normalize to start of pulse, all pulses overlayed')
     ax2.set_ylabel('Array index within pulse')
-    ax2.set_xlabel('Start time of pulse (ms)')
+    ax2.set_xlabel('Start time of pulse (ms)') if in_ms else ax2.set_xlabel('Start time of pulse (s)')
     
     time_tick_positions = np.arange(1, NUM_PULSES, NUM_PULSES / len(time_ticks))
     selected_positions = time_tick_positions[0::int(len(time_ticks)/10)]
@@ -566,6 +594,182 @@ def plot_heat_map(input_files, folder_path = "", png_name = "", stddev = 3, use_
                 reflex_time = cuff_times_reshaped[r][c]
     print(f"Auto-detect found: Maximum muscle contraction found at {reflex_time} ms after hammer hit.")
 
+def plot_heat_map_fourier(input_files, folder_path = "", png_name = "", stddev = 0.3, in_ms = True):
+    '''
+    Plots Fourier heat map of given 2D array, displays it, allows user to search for a maximum, and saves it to specified location.\n
+
+    Inputs:
+    - input_files: Same format as output of get_reshaped_arrays.
+        hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, circuit_env_reshaped, calculated_envelope_reshaped, time_ticks, NUM_PULSES
+    - folder_path: Folder to save heatmap in. Must NOT end in "/". If it and png_name are blank, image will not be saved.
+    - png_name: Name of image to save heatmap in. If it and folder_path are blank, image will not be saved.
+    - stddev: How many standard deviations from the mean will be considered an outlier. Outliers determine the color limits
+            of the heat map. Make it lower to see more intense colors overall, and higher to see less intense colors overall.
+    
+    Ouputs:
+    - Displays (and, if specified, saves) heatmap of the passed input arrays.
+    '''
+
+    # Retrieve the data we need for the heat map
+    hammer_times = input_files[0]
+    hammer_recieved = input_files[1]
+    emg_recieved = input_files[2]
+    cuff_times_reshaped = input_files[3]
+    cuff_recieved_reshaped = input_files[4]
+    circuit_env_reshaped = input_files[5]
+    calculated_envelope_reshaped = input_files[6]
+    time_ticks = input_files[7]
+    NUM_PULSES = input_files[8]
+
+    # Get the FFT plots.
+    dt = np.mean(np.diff(hammer_times))
+    if (not in_ms): dt = dt*1000
+
+    # Compute FFT
+    fft_arr = []
+    positive_fft_frequencies = []
+    for recieved_pulse in cuff_recieved_reshaped:
+
+        fft_values = np.fft.fft(recieved_pulse)
+        fft_frequencies = np.fft.fftfreq(len(recieved_pulse), dt)
+        # print(f"{fft_frequencies[0]} kHz to {fft_frequencies[-1]}, length {len(fft_frequencies)//2}")
+
+        # Only take the positive frequencies (and corresponding FFT values)
+        positive_fft_frequencies = fft_frequencies[:len(fft_frequencies)//2]    # the x axis, frequency
+        positive_fft_values = np.abs(fft_values[:len(fft_values)//2])       # the y axis, number per frequency bucket
+        fft_arr.append(positive_fft_values)
+
+    # Plot using GridSpec
+    fig = plt.figure(figsize=(6, 8))
+    gs = gridspec.GridSpec(3, 1, height_ratios=[1, 1, 0.05])
+
+    # Hammer and EMG signal subplot
+    ax1 = plt.subplot(gs[0])
+    ax1.plot(hammer_times, hammer_recieved, color="blue", label="Hammer strike")
+    ax1.set_xlim(time_ticks[0], time_ticks[-1])
+    ax1.set_title("Hammer voltage vs time")
+    ax1.set_ylabel('Voltage (V)')
+    ax1.set_xlabel('Time (ms)')
+    ax1.legend()
+
+    # Cuff signal subplot
+    ax2 = plt.subplot(gs[1])
+    cuff_vals_for_heatmap = fft_arr
+    lower_outliers, upper_outliers, lower_lim_imshow, upper_lim_imshow = find_outliers_std(cuff_vals_for_heatmap, stddev)
+    lower_lim_imshow = 0
+    im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim_imshow)
+    ax2.set_title("Calculated FFT")
+    
+    # Setting y-axis ticks and labels
+    ax2.set_ylabel('Frequency (kHz)')
+    selected_frequency_ticks = np.round(np.asarray(positive_fft_frequencies[0::10]),2)
+    ax2.set_yticks(selected_frequency_ticks)
+    ax2.set_ylim(0, 80) # limit to 80 kHz
+
+    # Setting x-axis ticks and labels
+    time_tick_positions = np.arange(1, NUM_PULSES, NUM_PULSES / len(time_ticks))
+    selected_positions = time_tick_positions[0::int(len(time_ticks)/10)]
+    selected_ticks = np.round(np.asarray(time_ticks[0::int(len(time_ticks)/10)]), 2)
+    selected_positions = selected_positions[:min(len(selected_ticks), len(selected_positions))]
+    selected_ticks = selected_ticks[:min(len(selected_ticks), len(selected_positions))]
+    ax2.set_xticks(ticks=selected_positions)
+    ax2.set_xticklabels(labels=selected_ticks)
+    ax2.tick_params(axis='x', rotation=90)
+    ax2.set_xlabel('Start time of pulse (ms)') if in_ms else ax2.set_xlabel('Start time of pulse (s)')
+
+    # Colorbar subplot
+    cbar_ax = plt.subplot(gs[2])
+    fig.colorbar(im, cax=cbar_ax, orientation='horizontal')
+
+    # Save the figure before showing it
+    plt.subplots_adjust(hspace=1)
+    plt.show()
+
+    str_name = folder_path + "/" + png_name + '_FULL_COLORMAP.png'
+    if len(str_name) > 5: fig.savefig(str_name)
+    print(f"Saving to: {str_name}")
+
+    ################################################################################################# PLOT JUST THE LOWER PART
+    # Plot using GridSpec
+    fig = plt.figure(figsize=(6, 8))
+    gs = gridspec.GridSpec(3, 1, height_ratios=[1, 1, 0.05])
+
+    # Hammer and EMG signal subplot
+    ax1 = plt.subplot(gs[0])
+    ax1.plot(hammer_times, hammer_recieved, color="blue", label="Hammer strike")
+    ax1.set_xlim(time_ticks[0], time_ticks[-1])
+    ax1.set_title("Hammer voltage vs time")
+    ax1.set_ylabel('Voltage (V)')
+    ax1.set_xlabel('Time (ms)')
+    ax1.legend()
+
+    # Cuff signal subplot
+    ax2 = plt.subplot(gs[1])
+    cuff_vals_for_heatmap = fft_arr
+    lower_lim_imshow = 0
+    upper_lim_imshow = 20000
+    im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim_imshow)
+    ax2.set_title("Calculated FFT")
+    
+    # Setting y-axis ticks and labels
+    ax2.set_ylabel('Frequency (kHz)')
+    selected_frequency_ticks = np.round(np.asarray(positive_fft_frequencies[0::10]),2)
+    ax2.set_yticks(selected_frequency_ticks)
+    ax2.set_ylim(0, 10) # limit to 80 kHz
+
+    # Colorbar subplot
+    cbar_ax = plt.subplot(gs[2])
+    fig.colorbar(im, cax=cbar_ax, orientation='horizontal')
+
+    # Save the figure before showing it
+    plt.subplots_adjust(hspace=1)
+    plt.show()
+
+    str_name = folder_path + "/" + png_name + '_LOWER_COLORMAP.png'
+    if len(str_name) > 5: fig.savefig(str_name)
+    print(f"Saving to: {str_name}")
+
+    ############################################################################### PLOT JUST THE UPPER PART
+        # Plot using GridSpec
+    fig = plt.figure(figsize=(6, 8))
+    gs = gridspec.GridSpec(3, 1, height_ratios=[1, 1, 0.05])
+
+    # Hammer and EMG signal subplot
+    ax1 = plt.subplot(gs[0])
+    ax1.plot(hammer_times, hammer_recieved, color="blue", label="Hammer strike")
+    ax1.set_xlim(time_ticks[0], time_ticks[-1])
+    ax1.set_title("Hammer voltage vs time")
+    ax1.set_ylabel('Voltage (V)')
+    ax1.set_xlabel('Time (ms)')
+    ax1.legend()
+
+    # Cuff signal subplot
+    ax2 = plt.subplot(gs[1])
+    cuff_vals_for_heatmap = fft_arr
+    lower_lim_imshow = 0
+    upper_lim_imshow = 1000
+    im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim_imshow)
+    ax2.set_title("Calculated FFT")
+    
+    # Setting y-axis ticks and labels
+    ax2.set_ylabel('Frequency (kHz)')
+    selected_frequency_ticks = np.round(np.asarray(positive_fft_frequencies[0::10]),2)
+    ax2.set_yticks(selected_frequency_ticks)
+    ax2.set_ylim(40, 70) # limit to 80 kHz
+
+    # Colorbar subplot
+    cbar_ax = plt.subplot(gs[2])
+    fig.colorbar(im, cax=cbar_ax, orientation='horizontal')
+
+    # Save the figure before showing it
+    plt.subplots_adjust(hspace=1)
+    plt.show()
+
+    str_name = folder_path + "/" + png_name + '_UPPER_COLORMAP.png'
+    if len(str_name) > 5: fig.savefig(str_name)
+    print(f"Saving to: {str_name}")
+    plt.close(fig)
+
 def get_gif(all_csv_data, col_indexes, save_as_mp4 = True, plot_hammer = False, plot_circuit_envelope = True, plot_calculated_envelope = True, compare_contraction = False, active_recieved_pulses_filtered = None, file_folder_name = "", specific_file_name = ""):
     '''
     Plot the recieved pulses over time as a GIF or mp4.\n
@@ -636,7 +840,86 @@ def get_gif(all_csv_data, col_indexes, save_as_mp4 = True, plot_hammer = False, 
     print(f"Saved at: {save_place}")
     plt.show()
 
-def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env = True, use_abs = True, folder="", title="fig"):
+def get_fourier_gif(input_files, col_indexes, save_as_mp4 = True, in_ms = True, file_folder_name = "", specific_file_name = ""):
+    '''
+    Plot the recieved pulses over time as a GIF or mp4.\n
+
+    Inputs:
+    - input_files: output of get_reshaped_arrays
+    - col_indexes: Tells us which column in your CSV corresponds to what data collected from oscilloscope!
+        col_indexes = [times_col_index, hammer_index, transmit_col_index, recieve_col_index, circuit_col_index, emg_col_index = 1]
+            (It tells us which column of the CSV corresponds to times, to hammer, to cuff, etc)
+    Optional arguments:
+    - save_as_mp4: If true, saves as MP4, if false, saves as GIF. You must have ffmeg installed to save as an MP4.
+    - file_folder_name: Folder to save gif in. Must NOT end in "/". 
+    - specific_file_name: Name of gif to save. 
+    '''
+    
+    # Retrieve the data we need for the heat map
+    hammer_times = input_files[0]
+    hammer_recieved = input_files[1]
+    emg_recieved = input_files[2]
+    times_reshaped = input_files[3]
+    recieved_pulses_reshaped = input_files[4]
+    circuit_env_reshaped = input_files[5]
+    calculated_envelope_reshaped = input_files[6]
+    time_ticks = input_files[7]
+    NUM_PULSES = input_files[8]
+
+    # Get the FFT plots.
+    dt = np.mean(np.diff(hammer_times)) * 0.001
+    if (not in_ms): dt = dt*1000
+    fs = 1/dt
+
+    # Compute FFT
+    fft_arr = []
+    positive_fft_frequencies = []
+    for recieved_pulse in recieved_pulses_reshaped:
+        
+        # Zero pad
+        padding_length = 5000
+        new_recieved_pulse = np.pad(recieved_pulse, (0, padding_length), 'constant')
+
+        fft_values = np.fft.fft(new_recieved_pulse)
+        fft_frequencies = np.fft.fftfreq(len(new_recieved_pulse), dt)
+        # print(f"{fft_frequencies[0]} kHz to {fft_frequencies[-1]}, length {len(fft_frequencies)//2}")
+
+        # Only take the positive frequencies (and corresponding FFT values)
+        positive_fft_frequencies = fft_frequencies[:len(fft_frequencies)//2]    # the x axis, frequency
+        positive_fft_values = np.abs(fft_values[:len(fft_values)//2])       # the y axis, number per frequency bucket
+        fft_arr.append(positive_fft_values)
+
+    plt.plot(positive_fft_frequencies, fft_arr[0])
+    plt.show()
+
+    #######################################################################################################
+
+    min_y_axis, max_y_axis = 0, max(np.asarray(fft_arr).ravel())
+    positive_fft_frequencies = np.round(np.asarray(positive_fft_frequencies), 2)
+    
+    def update(frame):
+        plt.cla()  # Clear the current axes
+        plt.plot(positive_fft_frequencies, fft_arr[frame], label=f'Filtered recieved signal', alpha=0.7)
+        
+        plt.legend(loc='upper right')
+        plt.xlim(0, 80*1000)
+        plt.ylim(min_y_axis, max_y_axis)
+        plt.title(f'Pulse {frame}, starts at {times_reshaped[frame][0]} ms since hammer hit')
+        plt.xlabel('Frequency (kHz)')
+        plt.ylabel('Number of points')
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ani = FuncAnimation(fig, update, frames=NUM_PULSES, repeat=False)
+
+    # Save as GIF
+    extension = ".mp4" if save_as_mp4 else ".gif"
+    save_place = file_folder_name + "/" + specific_file_name + '_FFT_animation' + extension
+    writer = FFMpegWriter(fps=10, metadata=dict(artist='Me'), bitrate=1800) if save_as_mp4 else PillowWriter(fps=10)
+    ani.save(save_place, writer)
+    print(f"Saved at: {save_place}")
+    plt.show()
+    
+def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env = True, use_abs = True, folder="", title="fig", in_ms = True):
     '''
     Plots a heatmap as a single line (the line being the intergal or average of each pulse.)
 
@@ -657,7 +940,8 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
     i = 0
 
     # To slice which part of the heatmap we are observing (set both to False to not slice)
-    ignore_start_of_pulse = True
+    # We only need to slice on the box data.
+    ignore_start_of_pulse = False
     start_border_ms = 0.3 # Only look at the part of the pulse after this time in ms in the pulse
     ignore_end_of_pulse = True
     end_border_ms = 1.2 # Only look at the part of the pulse before this time in ms in the pulse
@@ -730,7 +1014,7 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
         plt.plot(these_times, these_lines, label = legends[i])
         plt.plot(these_times[max_index], these_lines[max_index], 'ro')
         plt.text(these_times[max_index], these_lines[max_index], f'Max {these_times[max_index]:.2f} ms,\n {these_lines[max_index]:.2f} mV', fontsize=6, ha='right', va='top')
-        plt.xlabel("Time since hammer hit (ms)")
+        plt.xlabel("Time since hammer hit (ms)") if in_ms else plt.xlabel("Time since hammer hit (s)")
         plt.ylabel("Voltage (mV)")
         plt.title("Integral of each pulse over time")
         
@@ -744,9 +1028,10 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
 
     # Save the image of all the overlayed trials.
     plt.legend()
+    time_unit = "ms" if in_ms else "s"
     # variance_signal = np.round(np.var(total_sum_signal_voltages, axis=0), 2)
     variance_signal = np.round(np.std(trial_maximum_times), 2)
-    save_path = folder + "/" + title + "_stddev_"+str(variance_signal)+"ms.png"
+    save_path = folder + "/" + title + "_stddev_"+str(variance_signal)+time_unit+".png"
     plt.savefig(save_path)
     print("Saving to "+save_path)
     plt.ylim(abs_min, abs_max)
@@ -768,26 +1053,157 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
     # Plot
     plt.plot(total_sum_signal_times, total_sum_signal_voltages)
     plt.ylim(abs_min, abs_max)
-    plt.xlabel("Time since hammer hit (ms)")
+    plt.xlabel("Time since hammer hit (ms)") if in_ms else plt.xlabel("Time since hammer hit (s)")
     plt.ylabel("Voltage (mV)")
     plt.title("Integral of each pulse over time")
 
     # Mark and label peaks (maxima)
     plt.plot(total_sum_signal_times[peaks], total_sum_signal_voltages[peaks], 'ro', label='Maxima')
     for i in peaks:
-        plt.text(total_sum_signal_times[i]+x_offset, total_sum_signal_voltages[i]+y_offset, f'Max {total_sum_signal_times[i]:.2f} ms,\n {total_sum_signal_voltages[i]:.2f} mV', fontsize=6, ha='right', va='top')
+        plt.text(total_sum_signal_times[i]+x_offset, total_sum_signal_voltages[i]+y_offset, f'Max {total_sum_signal_times[i]:.2f} '+time_unit+f',\n {total_sum_signal_voltages[i]:.2f} mV', fontsize=6, ha='right', va='top')
 
     # Mark and label valleys (minima)
     plt.plot(total_sum_signal_times[valleys], total_sum_signal_voltages[valleys], 'bo', label='Minima')
     for i in valleys:
-        plt.text(total_sum_signal_times[i]-x_offset, total_sum_signal_voltages[i]-y_offset, f'Min {total_sum_signal_times[i]:.2f} ms,\n {total_sum_signal_voltages[i]:.2f} mV', fontsize=6, ha='left', va='bottom')
+        plt.text(total_sum_signal_times[i]-x_offset, total_sum_signal_voltages[i]-y_offset, f'Min {total_sum_signal_times[i]:.2f} '+time_unit+f',\n {total_sum_signal_voltages[i]:.2f} mV', fontsize=6, ha='left', va='bottom')
         
     save_path = folder + "/" + title + "_average.png"
     plt.savefig(save_path)
     print("Saving to "+save_path)
     plt.show()
         
+########################################################################################################## Overall analsis of CSV functions
 
+def analyze_one_trial(file_name, col_order, plot_circuit_envelope):
+    '''
+    For a single trial, saves the images of:
+    
+    IF LOOKING AT CIRCUIT ENVELOPE (plot_circuit_envelope = True)
+    - the heat map (of circuit envelope height over time)
+    - the 2D line plot (of average circuit envelope integral over time)
+
+    IF LOOKING AT CALCULATED ENVELOPE (plot_circuit_envelope = False):
+    - the heat map (of calculated envelope height over time, bandpassed 40kHz to 60kHz)
+    - the heat map (of Fourier transform of the recieved signal over time)
+    - The 2D line plot comparing 3 lines overlayed:
+        - envelope of recieved pulses, unfiltered.
+        - envelope of recieved pulses with a 40kHz to 60kHz filter on them ("high pass filter")
+        - lowpass filter (how do the center of the pulses move up and down in time?) of the recieved pulses
+    '''
+
+    # 1. Replace "infinity" signs in oscilloscope file if present, and shape into numpy dataframe.
+    very_negative_number = -100
+    very_positive_number = 100
+    file_folder_name = file_name[:file_name.rindex("/")]
+    specific_file_name = file_name[file_name.rindex("/")+1:file_name.rindex(".")]
+    my_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+")
+    my_csv.replace([float('-inf'), '-∞'], very_negative_number, inplace=True)
+    my_csv.replace([float('inf'), '∞'], very_positive_number, inplace=True)
+    my_csv = my_csv.to_numpy()
+    
+    # Some of the longer files will have the time unit as seconds, not ms, so check this.
+    time_unit = check_time_unit(file_name)
+    in_ms = time_unit == "(ms)"
+
+    # 2. Get reshaped arrays. 
+    regular_reshaped_arr = get_reshaped_arrays(my_csv, col_order, filter_freqs=[40000,60000], in_ms=in_ms)
+        # used to get the unfiltered envelope
+    unfiltered_reshaped_arr = get_reshaped_arrays(my_csv, col_order, filter_freqs=[20,1000000000], in_ms=in_ms)
+        # used to get the lowpassed_signal
+    low = get_reshaped_arrays(my_csv, col_order, filter_freqs=[1,10000], in_ms=in_ms, keep_raw_data=False)
+        # set the so-called "calculated envelope" to actually just be the lowpassed signal reshaped
+    lowpassed_reshaped_arr = [low[0], low[1], low[2], low[3], low[4], low[5], low[4], low[7], low[8]]
+
+
+    # 3. Plots! These will save in the same folder that the file you are reading is in (unless you edit file_folder_name)
+    if (plot_circuit_envelope):
+        # Heat map of circuit envelope
+        plot_heat_map(regular_reshaped_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=3, plot_circuit_env=True, in_ms=in_ms)
+
+        # 2D average map of circuit envelope.
+        input_file_array = [regular_reshaped_arr]
+        legends = [specific_file_name]
+        plot_2d(input_file_array, legends, folder=file_folder_name, title=specific_file_name, use_calculated_env=False, in_ms=in_ms)
+
+    else:
+        # Heat map of filtered envelope.
+        plot_heat_map(regular_reshaped_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=3, plot_circuit_env=False, in_ms=in_ms)
+    
+        # Heat map of Fourier Transform.
+        plot_heat_map_fourier(regular_reshaped_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=3, in_ms=in_ms)
+
+        # 2D plot comparing 3 types of filtering
+        legends = ["lowpassed", "bandpassed", "unfiltered"]
+        input_file_array = [lowpassed_reshaped_arr, regular_reshaped_arr, unfiltered_reshaped_arr]
+        plot_2d(input_file_array, legends, folder=file_folder_name, title=specific_file_name, use_calculated_env=True)
+
+    # GIF
+    # get_fourier_gif(regular_reshaped_arr, col_order, save_as_mp4=False, file_folder_name=file_folder_name, specific_file_name=specific_file_name)
+
+def summary_of_trials(file_names, col_order, experiment_name, analyze_circuit_env):
+    '''
+    For a single experiment, saves the images of:
+    - the average heat map (of pulse envelope height over time, bandpassed 40kHz to 60kHz)
+    - The 2D line plot (of pulse envelope height over time, bandpassed 40kHz to 60kHz)
+        - One image showing each trial overlayed
+        - One image showing the average of all the trials
+    '''
+
+    legends = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10"]
+
+    input_files_across_trials = []
+    summed_heatmap_across_trials = []
+    file_folder_name = ""
+
+    time_unit = check_time_unit(file_name)
+    print(time_unit)
+    in_ms = time_unit == "(ms)"
+
+    # Loop through each file in the folder provided, extracting the heatmap array from each one.
+    for file_name in file_names:
+        # Get the name of file and folder the CSV is extracted from.
+        file_folder_name = file_name[:file_name.rindex("/")]
+        specific_file_name = file_name[file_name.rindex("/")+1:file_name.rindex(".")]
+
+        # Read the CSV and reshape the array.
+        trial_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+")
+        trial_csv.replace([float('-inf'), '-∞'], -100, inplace=True)
+        trial_csv.replace([float('inf'), '∞'], 100, inplace=True)
+        trial_csv = trial_csv.to_numpy()
+        trial_arr = get_reshaped_arrays(trial_csv, col_order)
+        reshaped_array_of_interest = trial_arr[5] if analyze_circuit_env else trial_arr[6]
+        input_files_across_trials.append(trial_arr)
+
+        # Running sum of heatmaps (the reshaped envelopes) across trials.
+        # The slicing is to account for the fact that sometimes the length of the arrays is off by 1.
+        if len(summed_heatmap_across_trials)==0: 
+            summed_heatmap_across_trials = np.asarray(reshaped_array_of_interest)
+        else: 
+            smaller_row_length = min(len(summed_heatmap_across_trials), len(reshaped_array_of_interest)) 
+            smaller_col_length = min(len(summed_heatmap_across_trials[0]), len(reshaped_array_of_interest[0])) 
+            # print(f"HEATMAP ADDING: adding shapes {np.shape(summed_heatmap_across_trials)} to incoming shape {np.shape(reshaped_array_of_interest)}")
+            summed_heatmap_across_trials = np.add(summed_heatmap_across_trials[0:smaller_row_length,0:smaller_col_length], 
+                                   np.asarray(reshaped_array_of_interest)[0:smaller_row_length,0:smaller_col_length])
+
+    # Formatting for plot_heat_map
+    i = input_files_across_trials[0]    # Arbitrarily use the times and hammer strike from the first trial. 
+    combined_input_file = []
+    #        0             1               2                  3                     4                    5                       6                  7         8
+    #  hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, circuit_env_reshaped, calculated_env_reshaped, time_ticks, NUM_PULSES
+    if (analyze_circuit_env):
+        combined_input_file = [i[0], i[1], i[2], i[3],i[4], summed_heatmap_across_trials/len(file_names), i[6],i[7], len(summed_heatmap_across_trials)]
+    else: 
+        combined_input_file = [i[0], i[1], i[2], i[3],i[4], i[5], summed_heatmap_across_trials/len(file_names), i[7], len(summed_heatmap_across_trials)]
+
+
+    ############################################## ACTUAL PLOTTING #############################################    
+    # Plot the overlayed line plots of each trial. The saved image will have the variance across lines in it.
+    plot_2d(input_files_across_trials, legends, use_abs=True, use_calculated_env=(not analyze_circuit_env), folder=file_folder_name, title=experiment_name, in_ms = in_ms)
+
+    # Plot the average heatmap across all trials for this experiment.
+    plot_heat_map(combined_input_file, stddev=6, plot_circuit_env=analyze_circuit_env, folder_path=file_folder_name, png_name=experiment_name+"_average", in_ms = in_ms)
+
+##########################################################################################################
 
 if __name__ == "__main__":
 
@@ -856,6 +1272,8 @@ if __name__ == "__main__":
         "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_8ms_36.csv",
         "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_8ms_37.csv"
     ]
+
+    ######## Sina -- individual.
 
     ######## RACHEL
     rachel_no_box_indiv = [
@@ -934,174 +1352,26 @@ if __name__ == "__main__":
 
     # REMINDER: col_index_order: col_indexes = [times, hammer, transmit, recieved, circuit_env, emg = 1]
     
-    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Example usage: Uncomment to analyze one trial.
-    ''' 
-    # !!!!!!!!!!!!!!! User should edit: file_name, col_order as needed.
-    file_name = box_file_names_sina_B5point5[0]
-    col_order = [0, 3, 4, 1, 2, 1]  # time, recieved, env, hammer, square
-    # !!!!!!!!!!!!!!!
-
-    # 1. Replace "infinity" signs in oscilloscope file if present, and shape into numpy dataframe.
-    very_negative_number = -100
-    very_positive_number = 100
-    file_folder_name = file_name[:file_name.rindex("/")]
-    specific_file_name = file_name[file_name.rindex("/")+1:file_name.rindex(".")]
-    my_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+")
-    my_csv.replace([float('-inf'), '-∞'], very_negative_number, inplace=True)
-    my_csv.replace([float('inf'), '∞'], very_positive_number, inplace=True)
-    my_csv = my_csv.to_numpy()
-
-    # 2. Get reshaped arrays. 
-    my_arr = get_reshaped_arrays(my_csv, col_order)
-   
-    # 3. Plots! These will save in the same folder that the file you are reading is in (unless you edit file_folder_name)
-    
-    # Heat map of circuit envelope
-    # plot_heat_map(my_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=6, plot_circuit_env=True)
-
-    # Heat map of calculated envelope
-    plot_heat_map(my_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=6, plot_circuit_env=False)
-
-    # GIF of calculated envelope and recieved pulses.
-    # get_gif(my_csv, col_order, save_as_mp4=False, plot_circuit_envelope = False, file_folder_name=file_folder_name, specific_file_name=specific_file_name)
-    
-    # 2D average map of calculated envelope.
-    # input_file_array = [my_arr]
-    # legends = [specific_file_name]
-    # plot_2d(input_file_array, legends, folder=file_folder_name, title=specific_file_name)
-    # '''
-
-    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Example usage: Analyzing multiple trials in one experiment 
-    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! (2D line plot and average heatmap) 
-    #'''
-    
-    # !!!!!!!!!!!!!!! User should edit: legends, col_order, file_names as needed.
-    legends = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10"]
-    col_order = [0, 3, 4, 1, 2, 1]  # time, recieved, ENVELOPE, hammer, square
+    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Example usage: Uncomment to analyze one experiment.
+    #''' 
+    # !!!!!!!!!!!!!!! User should edit: file_names, col_order, experiment_name as needed.
     file_names = pico_file_names_sina_P1
-    experiment_name = "LOWPASS_Summary_Sina_P1"
-    analyze_circuit_env = False
+    col_order = [0, 3, 4, 1, 2, 1]  # time=col 0, hammer=col 3, transmitted=col 4, raw recieved=col 1, circuit env=col 2, emg=1 (dummy)
+    experiment_name = "Exp_Summary_Sina_P1"
+    analyze_circuit_envelope = False
+    analyze_calculated_envelope = True
     # !!!!!!!!!!!!!!!
 
-    # plotting lowpass    
-    sig_times = []
-    hammer_sigs = []
-    lowpass_cuff_times = []
-    lowpass_cuff_sigs = []
-
+    # Analyze each trial in the experiment.
     for file_name in file_names:
-        # Get the name of file and folder the CSV is extracted from.
-        file_folder_name = file_name[:file_name.rindex("/")]
-        specific_file_name = file_name[file_name.rindex("/")+1:file_name.rindex(".")]
+        if (analyze_circuit_envelope):
+            analyze_one_trial(file_name, col_order, plot_circuit_envelope = True)
+        if (analyze_calculated_envelope):
+            analyze_one_trial(file_name, col_order, plot_circuit_envelope = False)
 
-        # Read the CSV
-        trial_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+")
-        trial_csv.replace([float('-inf'), '-∞'], -100, inplace=True)
-        trial_csv.replace([float('inf'), '∞'], 100, inplace=True)
-        trial_csv = trial_csv.to_numpy()
-
-        # extract the relevant columns
-        csv_times = trial_csv[:,col_order[0]]
-        csv_square_pulses = trial_csv[:,col_order[2]]
-        csv_recieved_pulses = trial_csv[:,col_order[3]]
-        csv_circuit_envelope =  trial_csv[:,col_order[4]]
-        csv_hammer = trial_csv[:,col_order[1]]
-
-        # lowpassing
-        dt = np.mean(np.diff(csv_times))
-        fs = 1000 / dt  # Sampling frequency
-        data = np.asarray(csv_recieved_pulses, dtype=float)
-        # lowpass_cuff_sigs.append(data)
-        
-        lowpass_cuff_sigs.append(get_filtered_pulses(csv_recieved_pulses, fs))
-        lowpass_cuff_times.append(csv_times)
-        sig_times = csv_times
-        hammer_sigs.append(get_filtered_pulses(csv_hammer, fs))
-
-    # Plot using GridSpec
-    fig = plt.figure(figsize=(6, 8))
-    gs = gridspec.GridSpec(3, 1, height_ratios=[1, 1, 0.05])
-
-    # Hammer and EMG signal subplot
-    ax1 = plt.subplot(gs[0])
-    
-    ax1.set_xlim(sig_times[0], sig_times[-1])
-    ax1.set_title("Hammer voltage vs time")
-    ax1.set_ylabel('Voltage (V)')
-    ax1.set_xlabel('Time (ms)')
-    ax1.legend()
-
-    # Cuff signal subplot
-    ax2 = plt.subplot(gs[1])
-    ax2.set_title(experiment_name)
-    ax2.set_ylabel('Voltage (mV)')
-    ax2.set_xlabel('Start time of pulse (ms)')
-    ax2.set_xlim(sig_times[0], sig_times[-1])
-
-    # Loop
-    for desired_trial_index in range(len(lowpass_cuff_times)):
-        times = lowpass_cuff_times[desired_trial_index]
-        hammer = hammer_sigs[desired_trial_index]
-        cuff = lowpass_cuff_sigs[desired_trial_index]
-        ax1.plot(times, hammer, color="blue", label="Hammer strike")
-        ax2.plot(times, cuff)
-
-        start_index_look_max = 20000
-        max_hammer_index = np.where(hammer == max(hammer[start_index_look_max:]))[0]
-        max_hammer_time = np.round(times[max_hammer_index + start_index_look_max], 2)
-        max_cuff_index = np.where(cuff == max(cuff[start_index_look_max:]))[0]
-        max_cuff_time = np.round(times[max_cuff_index + start_index_look_max], 2)
-        print(f"trial {18+desired_trial_index}: hammer peak {max_hammer_time} ms at index {max_hammer_index}, cuff peak {max_cuff_time} ms at index {max_cuff_index}, difference {max_hammer_time - max_cuff_time} ms" )
-
-    # Save the figure before showing it
-    plt.subplots_adjust(hspace=1)
-    # plt.show()
-    '''
-    input_files_across_trials = []
-    summed_heatmap_across_trials = []
-    file_folder_name = ""
-
-    # Loop through each file in the folder provided, extracting the heatmap array from each one.
-    for file_name in file_names:
-        # Get the name of file and folder the CSV is extracted from.
-        file_folder_name = file_name[:file_name.rindex("/")]
-        specific_file_name = file_name[file_name.rindex("/")+1:file_name.rindex(".")]
-
-        # Read the CSV and reshape the array.
-        trial_csv = pd.read_csv(file_name,skiprows=1, sep=',' if file_name[-1]=="v" else "\s+")
-        trial_csv.replace([float('-inf'), '-∞'], -100, inplace=True)
-        trial_csv.replace([float('inf'), '∞'], 100, inplace=True)
-        trial_csv = trial_csv.to_numpy()
-        trial_arr = get_reshaped_arrays(trial_csv, col_order)
-        reshaped_array_of_interest = trial_arr[5] if analyze_circuit_env else trial_arr[6]
-        input_files_across_trials.append(trial_arr)
-
-        # Running sum of heatmaps (the reshaped envelopes) across trials.
-        # The slicing is to account for the fact that sometimes the length of the arrays is off by 1.
-        if len(summed_heatmap_across_trials)==0: 
-            summed_heatmap_across_trials = np.asarray(reshaped_array_of_interest)
-        else: 
-            smaller_row_length = min(len(summed_heatmap_across_trials), len(reshaped_array_of_interest)) 
-            smaller_col_length = min(len(summed_heatmap_across_trials[0]), len(reshaped_array_of_interest[0])) 
-            # print(f"HEATMAP ADDING: adding shapes {np.shape(summed_heatmap_across_trials)} to incoming shape {np.shape(reshaped_array_of_interest)}")
-            summed_heatmap_across_trials = np.add(summed_heatmap_across_trials[0:smaller_row_length,0:smaller_col_length], 
-                                   np.asarray(reshaped_array_of_interest)[0:smaller_row_length,0:smaller_col_length])
-
-    # Formatting for plot_heat_map
-    i = input_files_across_trials[0]    # Arbitrarily use the times and hammer strike from the first trial. 
-    combined_input_file = []
-    #        0             1               2                  3                     4                    5                       6                  7         8
-    #  hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, circuit_env_reshaped, calculated_env_reshaped, time_ticks, NUM_PULSES
-    if (analyze_circuit_env):
-        combined_input_file = [i[0], i[1], i[2], i[3],i[4], summed_heatmap_across_trials/len(file_names), i[6],i[7], len(summed_heatmap_across_trials)]
-    else: 
-        combined_input_file = [i[0], i[1], i[2], i[3],i[4], i[5], summed_heatmap_across_trials/len(file_names), i[7], len(summed_heatmap_across_trials)]
-
-
-    ############################################## ACTUAL PLOTTING #############################################    
-    # Plot the overlayed line plots of each trial. The saved image will have the variance across lines in it.
-    # plot_2d(input_files_across_trials, legends, use_abs=True, use_calculated_env=(not analyze_circuit_env), folder=file_folder_name, title=experiment_name)
-
-    # Plot the average heatmap across all trials for this experiment.
-    # plot_heat_map(combined_input_file, stddev=6, plot_circuit_env=analyze_circuit_env, folder_path=file_folder_name, png_name=experiment_name+"_average")
+    # Get a summary of the experiment.
+    if (analyze_circuit_envelope):
+        summary_of_trials(file_names, col_order, experiment_name, analyze_circuit_env = True)  # heat map, line plots of circuit env
+    if (analyze_calculated_envelope):
+        summary_of_trials(file_names, col_order, experiment_name, analyze_circuit_env = False)  # heat map, line plots of calculated env
     # '''  
