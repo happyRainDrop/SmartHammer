@@ -1,6 +1,6 @@
 '''
 Name: analyze_Pico_data.py
-Last updated: 9/5/24 by Ruth Berkun
+Last updated: 9/12/24 by Ruth Berkun
 
 Table of contents:
     Helper functions:
@@ -16,6 +16,9 @@ Table of contents:
             Used to set color limits on heat maps and axis limits on gif
         sum_signals(times1, voltages1, times2, voltages2):
             Sums two time-varying 1D signals
+        check_time_unit(csv_file_name):   
+            Checks whether our CSV is in seconds or milliseconds
+
     Functions to analyze cuff data:
         get_reshaped_arrays(all_csv_data, col_indexes):
             Outputs 2D array for cuff heatmap, as well as other processing information for other functions to use.
@@ -26,10 +29,20 @@ Table of contents:
     Functions to display and save data:
         plot_heat_map(input_files, folder_path = "", png_name = "", stddev = 3, use_emg = False, plot_circuit_env = False):
             Plots heat map of given 2D array, displays it, allows user to search for a maximum, and saves it to specified location
+        plot_heat_map_fourier(input_files, folder_path = "", png_name = "", stddev = 1, in_ms = True):
+            Plots heat map of the FFT of the signal (y axis frequency, x axis time) and saves it to the specified location
         get_gif(all_csv_data, col_indexes, save_as_mp4 = True, plot_hammer = False, plot_circuit_envelope = True, plot_calculated_envelope = True, compare_contraction = False, active_recieved_pulses_filtered = None, file_folder_name = "", specific_file_name = ""):
             Plot the recieved pulses over time as a GIF or mp4
+        get_fourier_gif(input_files, col_indexes, save_as_mp4 = True, in_ms = True, file_folder_name = "", specific_file_name = ""):
+            Plot the FFT of each pulse over time as a GIF or mp4
         plot_2d(input_file_array, legends, use_integral = True, use_calculated_env = True, use_abs = True, folder="", title="fig"):
             Plots a heatmap as a single line (the line being the intergal or average of each pulse.)
+
+    Functions to do all the analysis on (a) trial(s) at once:
+        analyze_one_trial(file_name, col_order, plot_circuit_envelope):
+            Plots the heat map, 2D line, and frequency information for one trial
+        summary_of_trials(file_names, col_order, experiment_name, analyze_circuit_env):
+            Plots the average heat map and line plot for the experiment, as well as overlayed line plots for each trial 
 
 Instructions for use: 
     - Stuff for user to edit is under 'if __name__ == "__main__":'
@@ -238,6 +251,7 @@ def get_reshaped_arrays(all_csv_data, col_indexes, filter_freqs = [40000, 60000]
     (It tells us which column of the CSV corresponds to times, to hammer, to cuff, etc)
     - keep_raw_data: If False, in the output, cuff_recieved_reshaped is the filtered pulses reshaped. If True, it is the raw pulses reshaped
                     Usually only set to False for when we're lowpassing (when we want cuff_recieved_reshaped to be the lowpassed signal)
+    
     Return: hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, circuit_env_reshaped, time_ticks, NUM_PULSES
     In each reshaped array: one row is one pulse. Reshaped arrays are 2D and all other arrays are 1D.
     - hammer_times, hammer_recieved, emg: Times and voltages of the hammer and EMG signal from the CSV.
@@ -485,7 +499,8 @@ def plot_heat_map(input_files, folder_path = "", png_name = "", stddev = 3, use_
             of the heat map. Make it lower to see more intense colors overall, and higher to see less intense colors overall.
     - use_emg: Boolean telling us whether or not to plot the EMG signal on top of the hammer signal.
     - plot_circuit_env: If true, the heat map will be of the circuit envelope. If false, the heat map will be of the calculated envelope.
-    
+    - in_ms: True if the time unit of the CSV is in ms, False if it is in seconds
+
     Ouputs:
     - Displays (and, if specified, saves) heatmap of the passed input arrays.
     '''
@@ -618,10 +633,12 @@ def plot_heat_map_fourier(input_files, folder_path = "", png_name = "", stddev =
     - png_name: Name of image to save heatmap in. If it and folder_path are blank, image will not be saved.
     - stddev: How many standard deviations from the mean will be considered an outlier. Outliers determine the color limits
             of the heat map. Make it lower to see more intense colors overall, and higher to see less intense colors overall.
+    - in_ms: True if the time unit of the CSV is in ms, False if it is in seconds
     
     Ouputs:
     - Displays (and, if specified, saves) heatmap of the passed input arrays.
     '''
+    show_zoomed_fourier_maps = False
 
     # Retrieve the data we need for the heat map
     hammer_times = input_files[0]
@@ -704,85 +721,87 @@ def plot_heat_map_fourier(input_files, folder_path = "", png_name = "", stddev =
     if len(str_name) > 5: fig.savefig(str_name)
     print(f"Saving to: {str_name}")
 
-    ################################################################################################# PLOT JUST THE LOWER PART
-    # Plot using GridSpec
-    fig = plt.figure(figsize=(6, 8))
-    gs = gridspec.GridSpec(3, 1, height_ratios=[1, 1, 0.05])
-
-    # Hammer and EMG signal subplot
-    ax1 = plt.subplot(gs[0])
-    ax1.plot(hammer_times, hammer_recieved, color="blue", label="Hammer strike")
-    ax1.set_xlim(time_ticks[0], time_ticks[-1])
-    ax1.set_title("Hammer voltage vs time")
-    ax1.set_ylabel('Voltage (V)')
-    ax1.set_xlabel('Time (ms)')
-    ax1.legend()
-
-    # Cuff signal subplot
-    ax2 = plt.subplot(gs[1])
-    cuff_vals_for_heatmap = fft_arr
-    lower_lim_imshow = 0
-    upper_lim = upper_lim_imshow / 5
-    im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim)
-    ax2.set_title("Calculated FFT")
-    
-    # Setting y-axis ticks and labels
-    ax2.set_ylabel('Frequency (kHz)')
-    selected_frequency_ticks = np.round(np.asarray(positive_fft_frequencies[0::10]),2)
-    ax2.set_yticks(selected_frequency_ticks)
-    ax2.set_ylim(0, 10) # limit to 80 kHz
-
-    # Colorbar subplot
-    cbar_ax = plt.subplot(gs[2])
-    fig.colorbar(im, cax=cbar_ax, orientation='horizontal')
-
-    # Save the figure before showing it
-    plt.subplots_adjust(hspace=1)
-    plt.show()
-
-    str_name = folder_path + "/" + png_name + '_LOWER_COLORMAP.png'
-    if len(str_name) > 5: fig.savefig(str_name)
-    print(f"Saving to: {str_name}")
-
-    ############################################################################### PLOT JUST THE UPPER PART
+    if show_zoomed_fourier_maps:
+        ################################################################################################# PLOT JUST THE LOWER PART
         # Plot using GridSpec
-    fig = plt.figure(figsize=(6, 8))
-    gs = gridspec.GridSpec(3, 1, height_ratios=[1, 1, 0.05])
+        fig = plt.figure(figsize=(6, 8))
+        gs = gridspec.GridSpec(3, 1, height_ratios=[1, 1, 0.05])
 
-    # Hammer and EMG signal subplot
-    ax1 = plt.subplot(gs[0])
-    ax1.plot(hammer_times, hammer_recieved, color="blue", label="Hammer strike")
-    ax1.set_xlim(time_ticks[0], time_ticks[-1])
-    ax1.set_title("Hammer voltage vs time")
-    ax1.set_ylabel('Voltage (V)')
-    ax1.set_xlabel('Time (ms)')
-    ax1.legend()
+        # Hammer and EMG signal subplot
+        ax1 = plt.subplot(gs[0])
+        ax1.plot(hammer_times, hammer_recieved, color="blue", label="Hammer strike")
+        ax1.set_xlim(time_ticks[0], time_ticks[-1])
+        ax1.set_title("Hammer voltage vs time")
+        ax1.set_ylabel('Voltage (V)')
+        ax1.set_xlabel('Time (ms)')
+        ax1.legend()
 
-    # Cuff signal subplot
-    ax2 = plt.subplot(gs[1])
-    cuff_vals_for_heatmap = fft_arr
-    lower_lim_imshow = 0
-    upper_lim = upper_lim_imshow / 2
-    im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim)
-    ax2.set_title("Calculated FFT")
-    
-    # Setting y-axis ticks and labels
-    ax2.set_ylabel('Frequency (kHz)')
-    selected_frequency_ticks = np.round(np.asarray(positive_fft_frequencies[0::10]),2)
-    ax2.set_yticks(selected_frequency_ticks)
-    ax2.set_ylim(40, min(70, positive_fft_frequencies[-1])) # limit to 80 kHz
+        # Cuff signal subplot
+        ax2 = plt.subplot(gs[1])
+        cuff_vals_for_heatmap = fft_arr
+        lower_lim_imshow = 0
+        upper_lim = upper_lim_imshow / 5
+        im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim)
+        ax2.set_title("Calculated FFT")
+        
+        # Setting y-axis ticks and labels
+        ax2.set_ylabel('Frequency (kHz)')
+        selected_frequency_ticks = np.round(np.asarray(positive_fft_frequencies[0::10]),2)
+        ax2.set_yticks(selected_frequency_ticks)
+        ax2.set_ylim(0, 10) # limit to 80 kHz
 
-    # Colorbar subplot
-    cbar_ax = plt.subplot(gs[2])
-    fig.colorbar(im, cax=cbar_ax, orientation='horizontal')
+        # Colorbar subplot
+        cbar_ax = plt.subplot(gs[2])
+        fig.colorbar(im, cax=cbar_ax, orientation='horizontal')
 
-    # Save the figure before showing it
-    plt.subplots_adjust(hspace=1)
-    plt.show()
+        # Save the figure before showing it
+        plt.subplots_adjust(hspace=1)
+        plt.show()
 
-    str_name = folder_path + "/" + png_name + '_UPPER_COLORMAP.png'
-    if len(str_name) > 5: fig.savefig(str_name)
-    print(f"Saving to: {str_name}")
+        str_name = folder_path + "/" + png_name + '_LOWER_COLORMAP.png'
+        if len(str_name) > 5: fig.savefig(str_name)
+        print(f"Saving to: {str_name}")
+
+        ############################################################################### PLOT JUST THE UPPER PART
+            # Plot using GridSpec
+        fig = plt.figure(figsize=(6, 8))
+        gs = gridspec.GridSpec(3, 1, height_ratios=[1, 1, 0.05])
+
+        # Hammer and EMG signal subplot
+        ax1 = plt.subplot(gs[0])
+        ax1.plot(hammer_times, hammer_recieved, color="blue", label="Hammer strike")
+        ax1.set_xlim(time_ticks[0], time_ticks[-1])
+        ax1.set_title("Hammer voltage vs time")
+        ax1.set_ylabel('Voltage (V)')
+        ax1.set_xlabel('Time (ms)')
+        ax1.legend()
+
+        # Cuff signal subplot
+        ax2 = plt.subplot(gs[1])
+        cuff_vals_for_heatmap = fft_arr
+        lower_lim_imshow = 0
+        upper_lim = upper_lim_imshow / 2
+        im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim)
+        ax2.set_title("Calculated FFT")
+        
+        # Setting y-axis ticks and labels
+        ax2.set_ylabel('Frequency (kHz)')
+        selected_frequency_ticks = np.round(np.asarray(positive_fft_frequencies[0::10]),2)
+        ax2.set_yticks(selected_frequency_ticks)
+        ax2.set_ylim(40, min(70, positive_fft_frequencies[-1])) # limit to 80 kHz
+
+        # Colorbar subplot
+        cbar_ax = plt.subplot(gs[2])
+        fig.colorbar(im, cax=cbar_ax, orientation='horizontal')
+
+        # Save the figure before showing it
+        plt.subplots_adjust(hspace=1)
+        plt.show()
+
+        str_name = folder_path + "/" + png_name + '_UPPER_COLORMAP.png'
+        if len(str_name) > 5: fig.savefig(str_name)
+        print(f"Saving to: {str_name}")
+
     plt.close(fig)
 
 def get_gif(all_csv_data, col_indexes, save_as_mp4 = True, plot_hammer = False, plot_circuit_envelope = True, plot_calculated_envelope = True, compare_contraction = False, active_recieved_pulses_filtered = None, file_folder_name = "", specific_file_name = ""):
@@ -857,7 +876,7 @@ def get_gif(all_csv_data, col_indexes, save_as_mp4 = True, plot_hammer = False, 
 
 def get_fourier_gif(input_files, col_indexes, save_as_mp4 = True, in_ms = True, file_folder_name = "", specific_file_name = ""):
     '''
-    Plot the recieved pulses over time as a GIF or mp4.\n
+    Plot the FFT of each recieved pulse over time as a GIF or mp4.\n
 
     Inputs:
     - input_files: output of get_reshaped_arrays
@@ -868,6 +887,9 @@ def get_fourier_gif(input_files, col_indexes, save_as_mp4 = True, in_ms = True, 
     - save_as_mp4: If true, saves as MP4, if false, saves as GIF. You must have ffmeg installed to save as an MP4.
     - file_folder_name: Folder to save gif in. Must NOT end in "/". 
     - specific_file_name: Name of gif to save. 
+    - in_ms: True if the time unit of the CSV is in ms, False if it is in seconds
+
+    Outputs: A GIF or MP4 of the FFT of the signal over time
     '''
     
     # Retrieve the data we need for the heat map
@@ -937,6 +959,7 @@ def get_fourier_gif(input_files, col_indexes, save_as_mp4 = True, in_ms = True, 
 def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env = True, use_abs = True, folder="", title="fig", in_ms = True, comparing_filters = False):
     '''
     Plots a heatmap as a single line (the line being the intergal or average of each pulse.)
+    Then, combines all trials in input_file_array into a single line.
 
     Inputs:
      - input_file_array: An array of input_files. Each input_file is the same format as input_files in plot_heat_map and get_reshaped_arrays.
@@ -1114,6 +1137,15 @@ def analyze_one_trial(file_name, col_order, plot_circuit_envelope):
         - envelope of recieved pulses, unfiltered.
         - envelope of recieved pulses with a 40kHz to 60kHz filter on them ("high pass filter")
         - lowpass filter (how do the center of the pulses move up and down in time?) of the recieved pulses
+
+    Inputs:
+    - file_name: The path to the CSV or text file we wish to analyze
+    - col_indexes: Tells us which column in your CSV corresponds to what data collected from oscilloscope. \n
+        \t col_indexes = [times_col_index, hammer_index, transmit_col_index, recieve_col_index, circuit_col_index, emg_col_index = 1]
+        (It tells us which column of the CSV corresponds to times, to hammer, to cuff, etc)
+    - plot_circuit_envelope: If true, analyzes the measured circuit envelope, if false, analzes the calculated envelope of the data
+
+    Outputs: Saves the images described above
     '''
     if (verbose): print("Starting analysis...")
 
@@ -1191,6 +1223,16 @@ def summary_of_trials(file_names, col_order, experiment_name, analyze_circuit_en
     - The 2D line plot (of pulse envelope height over time, bandpassed 40kHz to 60kHz)
         - One image showing each trial overlayed
         - One image showing the average of all the trials
+    
+    Inputs:
+    - file_names: An array of the paths to the CSV or text files we wish to analyze
+    - col_indexes: Tells us which column in your CSV corresponds to what data collected from oscilloscope. \n
+        \t col_indexes = [times_col_index, hammer_index, transmit_col_index, recieve_col_index, circuit_col_index, emg_col_index = 1]
+        (It tells us which column of the CSV corresponds to times, to hammer, to cuff, etc)
+    - experiment_name: Used as part of the name of the images we save
+    - analyze_circuit_env: If true, analyzes the measured circuit envelope, if false, analzes the calculated envelope of the data    
+    
+    Outputs: Saves the images described above
     '''
 
     legends = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10"]
@@ -1255,44 +1297,6 @@ if __name__ == "__main__":
     ################                     Commonly processed files                      ##################
     #####################################################################################################
 
-    # Ruth manual contraction
-    ruth_manual_contraction_long = [
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthlongmanual1.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthlongmanual2.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthlongmanual3.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthlongmanual4.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthlongmanual5.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthlongmanual6.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthlongmanual7.csv"
-    ]
-
-    ruth_manual_contraction_short = [
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthshortmanual1.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthshortmanual2.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthshortmanual3.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthshortmanual4.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthshortmanual5.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthshortmanual6.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthshortmanual7.csv"
-    ]
-
-    # Sina manual contraction
-    sina_manual_contraction_long = [
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_long_1.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_long_2.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_long_3.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_long_4.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_long_5.csv"
-    ]
-
-    sina_manual_contraction_short = [
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_short_1.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_short_2.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_short_3.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_short_4.csv",
-        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_short_5.csv"
-    ]
-
     # SINA: 
     # T1-T5: B1.5 (lasts ~110 ms) – Reflex starts between 60 ms and 66.81 ms
     # T6-T10: B2 (lasts ~140 ms) – Reflex starts between 
@@ -1302,26 +1306,6 @@ if __name__ == "__main__":
     # T23-T27: P2 (lasts ~470 ms)
     # T28-32: P4 (lasts ~470 ms)
     # T33-37: P8 (lasts ~470 ms)
-    
-    box_file_names_sina_B1point5 = [
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina1.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina2.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina3.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina4.csv",
-    ]
-    box_file_names_sina_B2 = [
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina7.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina8.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina9.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina10.csv"
-    ]
-    box_file_names_sina_B5point5 = [
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina12.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina14.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina15.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina16.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina17.csv"
-    ]
 
     pico_file_names_sina_P1 = [
         "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina18.csv",
@@ -1329,103 +1313,6 @@ if __name__ == "__main__":
         "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina20.csv",
         "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina21.csv",
         "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina22.csv"
-    ]
-
-    pico_file_names_sina_P2 = [
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_2ms_23.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_2ms_24.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_2ms_25.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_2ms_26.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_2ms_27.csv"
-    ]
-
-    pico_file_names_sina_P4 = [
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_4ms_28.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_4ms_29.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_4ms_30.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_4ms_31.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_4ms_32.csv"
-    ]
-
-    pico_file_names_sina_P8 = [
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_8ms_33.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_8ms_34.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_8ms_35.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_8ms_36.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina_8ms_37.csv"
-    ]
-
-    ######## Sina -- individual.
-
-    ######## RACHEL
-    rachel_no_box_indiv = [
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t1.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t2.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t3.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t4.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t5.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t6.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t7.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t8.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t9.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t10.csv"
-    ]
-
-    rachel_day_1_B1point5 = [
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_1.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_2.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_3.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_4.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_5.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_6.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_7.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_8.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_9.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_8_30_24/rachel_10.csv",
-    ]
-
-    rachel_day_2_B1point5 = [
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel1.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel2.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel3.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel4.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel5.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel6.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel7.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel8.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel9.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_9_4_24/rachel10.csv"
-    ]
-
-    rachel_day_1_B5point5 = [
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_8_30_24/rachel_long_trial_1_better.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_8_30_24/rachel_long_trial_2.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_8_30_24/rachel_long_trial_3.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_8_30_24/rachel_long_trial_4.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_8_30_24/rachel_long_trial_5.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_8_30_24/rachel_long_trial_6.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_8_30_24/rachel_long_trial_7.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_8_30_24/rachel_long_trial_8.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_8_30_24/rachel_long_trial_9.csv"
-    ]
-
-    rachel_day_2_B5point5 = [
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_9_4_24/rachel1.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_9_4_24/rachel2.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_9_4_24/rachel3.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_9_4_24/rachel4.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/rachel/Pico/rachel_9_4_24/rachel5.csv"
-    ]
-
-
-    #### HAMID
-
-    hamid_indiv_long_trials = [
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/hamid/Pico/hamidtrial11.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/hamid/Pico/hamidtrial13.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/hamid/Pico/hamidtrial14.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/hamid/Pico/hamidtrial15.csv",
-        "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/hamid/Pico/hamidtrial16.csv",
     ]
 
     #####################################################################################################
@@ -1437,10 +1324,9 @@ if __name__ == "__main__":
     # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Example usage: Uncomment to analyze one experiment.
     #''' 
     # !!!!!!!!!!!!!!! User should edit: file_names, col_order, experiment_name as needed.
-    file_names = ruth_manual_contraction_short
-    col_order = [0, 1, 2, 1, 1, 1]
-    #col_order = [0, 3, 4, 1, 2, 1]  # time=col 0, hammer=col 3, transmitted=col 4, raw recieved=col 1, circuit env=col 2, emg=1 (dummy)
-    experiment_name = "Exp_Summary_Ruth_Manual_Long"
+    file_names = pico_file_names_sina_P1
+    col_order = [0, 3, 4, 1, 2, 1]  # time=col 0, hammer=col 3, transmitted=col 4, raw recieved=col 1, circuit env=col 2, emg=1 (dummy)
+    experiment_name = "Exp_Summary_Sina_P1"
     analyze_circuit_envelope = False
     analyze_calculated_envelope = True
     # !!!!!!!!!!!!!!!
@@ -1453,7 +1339,7 @@ if __name__ == "__main__":
         if (analyze_calculated_envelope):
             analyze_one_trial(file_name, col_order, plot_circuit_envelope = False)
     #'''
-    '''
+    #'''
     # Get a summary of the experiment.
     if (analyze_circuit_envelope):
         summary_of_trials(file_names, col_order, experiment_name, analyze_circuit_env = True)  # heat map, line plots of circuit env
