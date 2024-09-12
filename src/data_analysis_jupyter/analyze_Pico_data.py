@@ -57,6 +57,8 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.interpolate import interp1d
 from scipy.signal import decimate
 
+verbose = False
+
 ####################################################################################################### Helper fns
 
 def find_maxima_envelope(signal, sampling_rate, approx_frequency):
@@ -135,11 +137,10 @@ def get_filtered_pulses(data, Sampling_frequency, use_raw_envelope = False, filt
             filtered = medfilt(data, window_size)
             # print(f"filtered data length {len(filtered)}, versus original {len(data)}, window size {window_size}")
             
-        '''
-        plt.plot(np.arange(len(data)), data)
-        plt.plot(np.arange(len(filtered)), filtered)
-        plt.show()
-        # '''
+        if (verbose):
+            plt.plot(np.arange(len(data)), data)
+            plt.plot(np.arange(len(filtered)), filtered)
+            plt.show()
         return filtered
 
 def get_envelope(data, use_raw_envelope = False):
@@ -220,7 +221,7 @@ def check_time_unit(csv_file_name):
     Returns time unit as string "(ms)" or "(s)"
     '''
 
-    df = pd.read_csv(csv_file_name, nrows=2, sep=',' if file_name[-1]=="v" else "\s+")  # Read only the first two rows
+    df = pd.read_csv(csv_file_name, nrows=2, sep=',' if csv_file_name[-1]=="v" else "\s+")  # Read only the first two rows
     time_unit = df.iloc[0,0]  # Get the unit from the second row
     return time_unit
 
@@ -1011,7 +1012,6 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
                 first_pulse = first_pulse[:end_border_index]
 
             if use_abs: # and (not (comparing_filters)): 
-                # Do NOT normalize to first "pulse" for the lowpassed thing
                 pulse_of_interest = np.abs(pulse_of_interest - first_pulse)
 
             if use_integral: these_lines.append(np.sum(pulse_of_interest)*dt)
@@ -1028,10 +1028,10 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
             end_border *= 0.001
         start_time_index = np.searchsorted(these_times, start_border, side='right')
         end_time_index = np.searchsorted(these_times, end_border, side='left')-1
+        these_lines = gaussian_filter1d(these_lines, sigma=1)
         if (end_time_index < start_time_index):
             max_index = 0  # skip
         else:
-            these_lines = gaussian_filter1d(these_lines, sigma=1)
             max_index = np.argmax(these_lines[start_time_index:end_time_index]) + start_time_index
             trial_maximum_times.append(these_times[max_index])
 
@@ -1115,6 +1115,7 @@ def analyze_one_trial(file_name, col_order, plot_circuit_envelope):
         - envelope of recieved pulses with a 40kHz to 60kHz filter on them ("high pass filter")
         - lowpass filter (how do the center of the pulses move up and down in time?) of the recieved pulses
     '''
+    if (verbose): print("Starting analysis...")
 
     # 1. Replace "infinity" signs in oscilloscope file if present, and shape into numpy dataframe.
     very_negative_number = -100
@@ -1126,32 +1127,39 @@ def analyze_one_trial(file_name, col_order, plot_circuit_envelope):
     my_csv.replace([float('inf'), '∞'], very_positive_number, inplace=True)
     my_csv = my_csv.to_numpy()
     
+    if (verbose): print(f"Finished reading in CSV {file_name}")
 
-    '''
+    #'''
     # Optional sanity-check plotting of the overall data.
-    csv_times = my_csv[:,col_order[0]]
-    csv_square_pulses = my_csv[:,col_order[2]]
-    csv_recieved_pulses = my_csv[:,col_order[3]]
-    plt.plot(csv_times, csv_square_pulses)
-    plt.plot(csv_times, csv_recieved_pulses)
-    plt.show()
-    # '''
+    if (verbose):
+        csv_times = my_csv[:,col_order[0]]
+        csv_square_pulses = my_csv[:,col_order[2]]
+        csv_recieved_pulses = my_csv[:,col_order[3]]
+        plt.plot(csv_times, csv_square_pulses)
+        plt.plot(csv_times, csv_recieved_pulses)
+        plt.show()
+        # '''
     
-
     # Some of the longer files will have the time unit as seconds, not ms, so check this.
     time_unit = check_time_unit(file_name)
     in_ms = time_unit == "(ms)"
+    if (verbose): print(f"\tThe time unit of this CSV is {time_unit}")
 
     # 2. Get reshaped arrays. 
-    regular_reshaped_arr = get_reshaped_arrays(my_csv, col_order, filter_freqs=[40000,59000], in_ms=in_ms)
+    if (verbose): print("\tGetting regular arrays (filtered 40 kHz to 60 kHz)...")
+    regular_reshaped_arr = get_reshaped_arrays(my_csv, col_order, filter_freqs=[40000,60000], in_ms=in_ms)
         # used to get the unfiltered envelope
+    if (verbose): print("\tGet unfiltered arrays and envelopes")
     unfiltered_reshaped_arr = get_reshaped_arrays(my_csv, col_order, filter_freqs=[20,1000000000], in_ms=in_ms)
         # used to get the lowpassed_signal
+    if (verbose): print("\tGet lowpass array")
     low = get_reshaped_arrays(my_csv, col_order, filter_freqs=[1,10000], in_ms=in_ms, keep_raw_data=False)
         # set the so-called "calculated envelope" to actually just be the lowpassed signal reshaped
     lowpassed_reshaped_arr = [low[0], low[1], low[2], low[3], low[4], low[5], low[4], low[7], low[8]]
 
     # 3. Plots! These will save in the same folder that the file you are reading is in (unless you edit file_folder_name)
+    if (verbose): print("Getting plots...")
+
     if (plot_circuit_envelope):
         # Heat map of circuit envelope
         plot_heat_map(regular_reshaped_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=3, plot_circuit_env=True, in_ms=in_ms)
@@ -1206,7 +1214,7 @@ def summary_of_trials(file_names, col_order, experiment_name, analyze_circuit_en
         trial_csv.replace([float('-inf'), '-∞'], -100, inplace=True)
         trial_csv.replace([float('inf'), '∞'], 100, inplace=True)
         trial_csv = trial_csv.to_numpy()
-        trial_arr = get_reshaped_arrays(trial_csv, col_order)
+        trial_arr = get_reshaped_arrays(trial_csv, col_order, filter_freqs=[40000,60000], in_ms=in_ms)
         reshaped_array_of_interest = trial_arr[5] if analyze_circuit_env else trial_arr[6]
         input_files_across_trials.append(trial_arr)
 
@@ -1237,7 +1245,7 @@ def summary_of_trials(file_names, col_order, experiment_name, analyze_circuit_en
     plot_2d(input_files_across_trials, legends, use_abs=True, use_calculated_env=(not analyze_circuit_env), folder=file_folder_name, title=experiment_name, in_ms = in_ms)
 
     # Plot the average heatmap across all trials for this experiment.
-    plot_heat_map(combined_input_file, stddev=6, plot_circuit_env=analyze_circuit_env, folder_path=file_folder_name, png_name=experiment_name+"_average", in_ms = in_ms)
+    plot_heat_map(combined_input_file, stddev=3, plot_circuit_env=analyze_circuit_env, folder_path=file_folder_name, png_name=experiment_name+"_average", in_ms = in_ms)
 
 ##########################################################################################################
 
@@ -1247,7 +1255,28 @@ if __name__ == "__main__":
     ################                     Commonly processed files                      ##################
     #####################################################################################################
 
-    # Sina manual contraction!
+    # Ruth manual contraction
+    ruth_manual_contraction_long = [
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthlongmanual1.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthlongmanual2.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthlongmanual3.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthlongmanual4.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthlongmanual5.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthlongmanual6.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthlongmanual7.csv"
+    ]
+
+    ruth_manual_contraction_short = [
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthshortmanual1.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthshortmanual2.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthshortmanual3.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthshortmanual4.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthshortmanual5.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthshortmanual6.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_ruth/ruthshortmanual7.csv"
+    ]
+
+    # Sina manual contraction
     sina_manual_contraction_long = [
         "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_long_1.csv",
         "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_long_2.csv",
@@ -1408,20 +1437,23 @@ if __name__ == "__main__":
     # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Example usage: Uncomment to analyze one experiment.
     #''' 
     # !!!!!!!!!!!!!!! User should edit: file_names, col_order, experiment_name as needed.
-    file_names = pico_file_names_sina_P1
-    col_order = [0, 3, 4, 1, 2, 1]  # time=col 0, hammer=col 3, transmitted=col 4, raw recieved=col 1, circuit env=col 2, emg=1 (dummy)
-    experiment_name = "Exp_Summary_Sina_P1"
+    file_names = ruth_manual_contraction_short
+    col_order = [0, 1, 2, 1, 1, 1]
+    #col_order = [0, 3, 4, 1, 2, 1]  # time=col 0, hammer=col 3, transmitted=col 4, raw recieved=col 1, circuit env=col 2, emg=1 (dummy)
+    experiment_name = "Exp_Summary_Ruth_Manual_Long"
     analyze_circuit_envelope = False
     analyze_calculated_envelope = True
     # !!!!!!!!!!!!!!!
 
+    #'''
     # Analyze each trial in the experiment.
     for file_name in file_names:
         if (analyze_circuit_envelope):
             analyze_one_trial(file_name, col_order, plot_circuit_envelope = True)
         if (analyze_calculated_envelope):
             analyze_one_trial(file_name, col_order, plot_circuit_envelope = False)
-
+    #'''
+    '''
     # Get a summary of the experiment.
     if (analyze_circuit_envelope):
         summary_of_trials(file_names, col_order, experiment_name, analyze_circuit_env = True)  # heat map, line plots of circuit env
