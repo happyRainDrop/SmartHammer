@@ -124,7 +124,7 @@ def get_filtered_pulses(data, Sampling_frequency, use_raw_envelope = False, filt
 
         if filter_frequencies[0] > lower_border:
             sos = butter(Filter_order, [Filter_lowcut, Filter_highcut], btype='bandpass', fs=Sampling_frequency, output='sos')
-            return np.apply_along_axis(lambda x: sosfilt(sos, x), axis=0, arr = data)
+            filtered= np.apply_along_axis(lambda x: sosfilt(sos, x), axis=0, arr = data)
         else:
             window_size_ms = 0.5
             dt = 1000/Sampling_frequency   # in ms
@@ -132,15 +132,15 @@ def get_filtered_pulses(data, Sampling_frequency, use_raw_envelope = False, filt
             # Ensure the window size is odd (required for median filter)
             if window_size % 2 == 0:
                 window_size += 1
-            lowpass = medfilt(data, window_size)
+            filtered = medfilt(data, window_size)
+            # print(f"filtered data length {len(filtered)}, versus original {len(data)}, window size {window_size}")
             
-            '''
-            plt.plot(np.arange(len(data)), data)
-            plt.plot(np.arange(len(lowpass)), lowpass)
-            print(f"filtered data length {len(lowpass)}, versus original {len(data)}")
-            plt.show()
-            '''
-            return lowpass
+        '''
+        plt.plot(np.arange(len(data)), data)
+        plt.plot(np.arange(len(filtered)), filtered)
+        plt.show()
+        # '''
+        return filtered
 
 def get_envelope(data, use_raw_envelope = False):
     '''
@@ -604,9 +604,9 @@ def plot_heat_map(input_files, folder_path = "", png_name = "", stddev = 3, use_
             if np.abs(amplitude_diff) > max_amplitude_heat_map and amplitude_diff > lower_lim_imshow and amplitude_diff < upper_lim_imshow:
                 max_amplitude_heat_map = np.abs(amplitude_diff)
                 reflex_time = cuff_times_reshaped[r][c]
-    print(f"Auto-detect found: Maximum muscle contraction found at {reflex_time} ms after hammer hit.")
+    # print(f"Auto-detect found: Maximum muscle contraction found at {reflex_time} ms after hammer hit.")
 
-def plot_heat_map_fourier(input_files, folder_path = "", png_name = "", stddev = 0.3, in_ms = True):
+def plot_heat_map_fourier(input_files, folder_path = "", png_name = "", stddev = 1, in_ms = True):
     '''
     Plots Fourier heat map of given 2D array, displays it, allows user to search for a maximum, and saves it to specified location.\n
 
@@ -636,6 +636,7 @@ def plot_heat_map_fourier(input_files, folder_path = "", png_name = "", stddev =
     # Get the FFT plots.
     dt = np.mean(np.diff(hammer_times))
     if (not in_ms): dt = dt*1000
+    # print(f"sampling frequency {1000/dt} Hz")
 
     # Compute FFT
     fft_arr = []
@@ -644,12 +645,13 @@ def plot_heat_map_fourier(input_files, folder_path = "", png_name = "", stddev =
 
         fft_values = np.fft.fft(recieved_pulse)
         fft_frequencies = np.fft.fftfreq(len(recieved_pulse), dt)
-        # print(f"{fft_frequencies[0]} kHz to {fft_frequencies[-1]}, length {len(fft_frequencies)//2}")
 
         # Only take the positive frequencies (and corresponding FFT values)
         positive_fft_frequencies = fft_frequencies[:len(fft_frequencies)//2]    # the x axis, frequency
         positive_fft_values = np.abs(fft_values[:len(fft_values)//2])       # the y axis, number per frequency bucket
         fft_arr.append(positive_fft_values)
+
+    # print(f"{positive_fft_frequencies[0]} kHz to {positive_fft_frequencies[-1]} kHz, length {len(positive_fft_frequencies)}")
 
     # Plot using GridSpec
     fig = plt.figure(figsize=(6, 8))
@@ -676,7 +678,7 @@ def plot_heat_map_fourier(input_files, folder_path = "", png_name = "", stddev =
     ax2.set_ylabel('Frequency (kHz)')
     selected_frequency_ticks = np.round(np.asarray(positive_fft_frequencies[0::10]),2)
     ax2.set_yticks(selected_frequency_ticks)
-    ax2.set_ylim(0, 80) # limit to 80 kHz
+    ax2.set_ylim(0, min(80, positive_fft_frequencies[-1])) # limit to 80 kHz
 
     # Setting x-axis ticks and labels
     time_tick_positions = np.arange(1, NUM_PULSES, NUM_PULSES / len(time_ticks))
@@ -719,8 +721,8 @@ def plot_heat_map_fourier(input_files, folder_path = "", png_name = "", stddev =
     ax2 = plt.subplot(gs[1])
     cuff_vals_for_heatmap = fft_arr
     lower_lim_imshow = 0
-    upper_lim_imshow = 2000
-    im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim_imshow)
+    upper_lim = upper_lim_imshow / 5
+    im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim)
     ax2.set_title("Calculated FFT")
     
     # Setting y-axis ticks and labels
@@ -759,15 +761,15 @@ def plot_heat_map_fourier(input_files, folder_path = "", png_name = "", stddev =
     ax2 = plt.subplot(gs[1])
     cuff_vals_for_heatmap = fft_arr
     lower_lim_imshow = 0
-    upper_lim_imshow = 1000
-    im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim_imshow)
+    upper_lim = upper_lim_imshow / 2
+    im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim)
     ax2.set_title("Calculated FFT")
     
     # Setting y-axis ticks and labels
     ax2.set_ylabel('Frequency (kHz)')
     selected_frequency_ticks = np.round(np.asarray(positive_fft_frequencies[0::10]),2)
     ax2.set_yticks(selected_frequency_ticks)
-    ax2.set_ylim(40, 70) # limit to 80 kHz
+    ax2.set_ylim(40, min(70, positive_fft_frequencies[-1])) # limit to 80 kHz
 
     # Colorbar subplot
     cbar_ax = plt.subplot(gs[2])
@@ -1021,12 +1023,17 @@ def plot_2d(input_file_array, legends, use_integral = True, use_calculated_env =
 
         # Smoothen and find maximum
         start_border, end_border = 50, 200 # ms to look for maximum of contraction in
+        if (not in_ms): 
+            start_border *= 0.001
+            end_border *= 0.001
         start_time_index = np.searchsorted(these_times, start_border, side='right')
         end_time_index = np.searchsorted(these_times, end_border, side='left')-1
-        
-        these_lines = gaussian_filter1d(these_lines, sigma=1)
-        max_index = np.argmax(these_lines[start_time_index:end_time_index]) + start_time_index
-        trial_maximum_times.append(these_times[max_index])
+        if (end_time_index < start_time_index):
+            max_index = 0  # skip
+        else:
+            these_lines = gaussian_filter1d(these_lines, sigma=1)
+            max_index = np.argmax(these_lines[start_time_index:end_time_index]) + start_time_index
+            trial_maximum_times.append(these_times[max_index])
 
         # Plot each individual trial and its maximum
         plt.plot(these_times, these_lines, label = legends[i])
@@ -1119,19 +1126,30 @@ def analyze_one_trial(file_name, col_order, plot_circuit_envelope):
     my_csv.replace([float('inf'), '∞'], very_positive_number, inplace=True)
     my_csv = my_csv.to_numpy()
     
+
+    '''
+    # Optional sanity-check plotting of the overall data.
+    csv_times = my_csv[:,col_order[0]]
+    csv_square_pulses = my_csv[:,col_order[2]]
+    csv_recieved_pulses = my_csv[:,col_order[3]]
+    plt.plot(csv_times, csv_square_pulses)
+    plt.plot(csv_times, csv_recieved_pulses)
+    plt.show()
+    # '''
+    
+
     # Some of the longer files will have the time unit as seconds, not ms, so check this.
     time_unit = check_time_unit(file_name)
     in_ms = time_unit == "(ms)"
 
     # 2. Get reshaped arrays. 
-    regular_reshaped_arr = get_reshaped_arrays(my_csv, col_order, filter_freqs=[40000,60000], in_ms=in_ms)
+    regular_reshaped_arr = get_reshaped_arrays(my_csv, col_order, filter_freqs=[40000,59000], in_ms=in_ms)
         # used to get the unfiltered envelope
     unfiltered_reshaped_arr = get_reshaped_arrays(my_csv, col_order, filter_freqs=[20,1000000000], in_ms=in_ms)
         # used to get the lowpassed_signal
     low = get_reshaped_arrays(my_csv, col_order, filter_freqs=[1,10000], in_ms=in_ms, keep_raw_data=False)
         # set the so-called "calculated envelope" to actually just be the lowpassed signal reshaped
     lowpassed_reshaped_arr = [low[0], low[1], low[2], low[3], low[4], low[5], low[4], low[7], low[8]]
-
 
     # 3. Plots! These will save in the same folder that the file you are reading is in (unless you edit file_folder_name)
     if (plot_circuit_envelope):
@@ -1228,6 +1246,23 @@ if __name__ == "__main__":
     #####################################################################################################
     ################                     Commonly processed files                      ##################
     #####################################################################################################
+
+    # Sina manual contraction!
+    sina_manual_contraction_long = [
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_long_1.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_long_2.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_long_3.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_long_4.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_long_5.csv"
+    ]
+
+    sina_manual_contraction_short = [
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_short_1.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_short_2.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_short_3.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_short_4.csv",
+        "C:/Users/tealw/Documents/Waveforms/manual_contraction_long_test_day_1/sina_short_5.csv"
+    ]
 
     # SINA: 
     # T1-T5: B1.5 (lasts ~110 ms) – Reflex starts between 60 ms and 66.81 ms
