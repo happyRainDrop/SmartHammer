@@ -1339,6 +1339,19 @@ if __name__ == "__main__":
         "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial9.txt",
         "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial10.txt"
     ]
+
+    rachel_two_cuff = [
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0001.csv",
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0002.csv",
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0003.csv",
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0004.csv",
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0005.csv",
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0006.csv",
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0007.csv",
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0008.csv",
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0009.csv",
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0010.csv"
+    ]
     #####################################################################################################
     #####################################################################################################
     #####################################################################################################
@@ -1348,14 +1361,14 @@ if __name__ == "__main__":
     # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Example usage: Uncomment to analyze one experiment.
     #''' 
     # !!!!!!!!!!!!!!! User should edit: file_names, col_order, experiment_name as needed.
-    file_names = pico_file_names_rachel_P1
+    file_names = rachel_two_cuff
     col_order = [0, 3, 4, 1, 2, 1]  # time=col 0, hammer=col 3, transmitted=col 4, raw recieved=col 1, circuit env=col 2, emg=1 (dummy)
-    experiment_name = "Exp_Summary_rachel_P1"
+    experiment_name = "Exp_Summary_rachel_two_cuff_calf"
     analyze_circuit_envelope = False
     analyze_calculated_envelope = True
     # !!!!!!!!!!!!!!!
 
-    #'''
+    '''
     # Analyze each trial in the experiment.
     for file_name in file_names:
         if (analyze_circuit_envelope):
@@ -1363,7 +1376,7 @@ if __name__ == "__main__":
         if (analyze_calculated_envelope):
             analyze_one_trial(file_name, col_order, plot_circuit_envelope = False)
     #'''
-    '''
+    #'''
     # Get a summary of the experiment.
     if (analyze_circuit_envelope):
         summary_of_trials(file_names, col_order, experiment_name, analyze_circuit_env = True)  # heat map, line plots of circuit env
