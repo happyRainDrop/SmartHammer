@@ -1199,7 +1199,6 @@ def analyze_one_trial(file_name, col_order, plot_circuit_envelope):
         input_file_array = [regular_reshaped_arr]
         legends = [specific_file_name]
         plot_2d(input_file_array, legends, folder=file_folder_name, title=specific_file_name, use_calculated_env=False, in_ms=in_ms)
-
     else:
         # Heat map of filtered envelope.
         plot_heat_map(regular_reshaped_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=3, plot_circuit_env=False, in_ms=in_ms)
