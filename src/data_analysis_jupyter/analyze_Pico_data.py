@@ -1324,10 +1324,21 @@ if __name__ == "__main__":
         "src/app_v1/data_from_experiments/reflex_by_subject/Pico/isabel/isabel_no_box/isabel6.csv",
         "src/app_v1/data_from_experiments/reflex_by_subject/Pico/isabel/isabel_no_box/isabel7.csv",
         "src/app_v1/data_from_experiments/reflex_by_subject/Pico/isabel/isabel_no_box/isabel8.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/isabel/isabel_no_box/isabel9.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/isabel/isabel_no_box/isabel10.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/isabel/isabel_no_box/isabel9.csv"
     ]
 
+    pico_file_names_priya_P1 = [
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial1.txt",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial2.txt",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial3.txt",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial4.txt",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial5.txt",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial6.txt",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial7.txt",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial8.txt",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial9.txt",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial10.txt"
+    ]
     #####################################################################################################
     #####################################################################################################
     #####################################################################################################
@@ -1337,9 +1348,9 @@ if __name__ == "__main__":
     # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Example usage: Uncomment to analyze one experiment.
     #''' 
     # !!!!!!!!!!!!!!! User should edit: file_names, col_order, experiment_name as needed.
-    file_names = pico_file_names_isabel_P1
+    file_names = pico_file_names_priya_P1
     col_order = [0, 2, 3, 1, 1, 1]  # time=col 0, hammer=col 3, transmitted=col 4, raw recieved=col 1, circuit env=col 2, emg=1 (dummy)
-    experiment_name = "Exp_Summary_isabel_P1"
+    experiment_name = "Exp_Summary_priya_P1"
     analyze_circuit_envelope = False
     analyze_calculated_envelope = True
     # !!!!!!!!!!!!!!!
