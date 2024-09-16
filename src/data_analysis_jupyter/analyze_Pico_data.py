@@ -1313,17 +1313,17 @@ if __name__ == "__main__":
         "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina22.csv"
     ]
 
-    pico_file_names_rachel_P1 = [
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t1.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t2.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t3.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t4.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t5.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t6.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t7.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t8.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t9.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t10.csv"
+    pico_file_names_brynna_P1 = [
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/brynna/brynna_no_box/brynna1.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/brynna/brynna_no_box/brynna2.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/brynna/brynna_no_box/brynna3.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/brynna/brynna_no_box/brynna4.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/brynna/brynna_no_box/brynna5.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/brynna/brynna_no_box/brynna6.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/brynna/brynna_no_box/brynna7.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/brynna/brynna_no_box/brynna8.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/brynna/brynna_no_box/brynna9.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/brynna/brynna_no_box/brynna10.csv"
     ]
 
     pico_file_names_priya_P1 = [
@@ -1338,19 +1338,6 @@ if __name__ == "__main__":
         "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial9.txt",
         "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial10.txt"
     ]
-
-    rachel_two_cuff = [
-        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0001.csv",
-        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0002.csv",
-        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0003.csv",
-        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0004.csv",
-        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0005.csv",
-        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0006.csv",
-        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0007.csv",
-        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0008.csv",
-        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0009.csv",
-        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0010.csv"
-    ]
     #####################################################################################################
     #####################################################################################################
     #####################################################################################################
@@ -1360,14 +1347,14 @@ if __name__ == "__main__":
     # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Example usage: Uncomment to analyze one experiment.
     #''' 
     # !!!!!!!!!!!!!!! User should edit: file_names, col_order, experiment_name as needed.
-    file_names = rachel_two_cuff
-    col_order = [0, 3, 4, 1, 2, 1]  # time=col 0, hammer=col 3, transmitted=col 4, raw recieved=col 1, circuit env=col 2, emg=1 (dummy)
-    experiment_name = "Exp_Summary_rachel_two_cuff_calf"
+    file_names = pico_file_names_brynna_P1
+    col_order = [0, 2, 3, 1, 2, 1]  # time=col 0, hammer=col 3, transmitted=col 4, raw recieved=col 1, circuit env=col 2, emg=1 (dummy)
+    experiment_name = "Exp_Summary_Brynna_P1"
     analyze_circuit_envelope = False
     analyze_calculated_envelope = True
     # !!!!!!!!!!!!!!!
 
-    '''
+    #'''
     # Analyze each trial in the experiment.
     for file_name in file_names:
         if (analyze_circuit_envelope):
