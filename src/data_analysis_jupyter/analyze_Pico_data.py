@@ -124,6 +124,7 @@ def get_filtered_pulses(data, Sampling_frequency, use_raw_envelope = False, filt
 
     lower_border = 10           # if filter_frequencies[0] < lower_border, it's a lowpass 
     higher_border = 1000000     # if filter_frequencies[1] > higher_border, do not filter.
+    data = np.asarray(data, dtype=float)
 
     if (use_raw_envelope):
         kernel_size = 3
@@ -132,8 +133,6 @@ def get_filtered_pulses(data, Sampling_frequency, use_raw_envelope = False, filt
         Filter_lowcut = filter_frequencies[0]
         Filter_highcut = filter_frequencies[1]
         Filter_order = 4        # not really sure what this is.
-        
-        data = np.asarray(data, dtype=float)
 
         if filter_frequencies[1] > higher_border: return data    # no filtering.
 
@@ -1200,13 +1199,12 @@ def analyze_one_trial(file_name, col_order, plot_circuit_envelope):
         input_file_array = [regular_reshaped_arr]
         legends = [specific_file_name]
         plot_2d(input_file_array, legends, folder=file_folder_name, title=specific_file_name, use_calculated_env=False, in_ms=in_ms)
-
     else:
         # Heat map of filtered envelope.
         plot_heat_map(regular_reshaped_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=3, plot_circuit_env=False, in_ms=in_ms)
     
         # Heat map of Fourier Transform.
-        plot_heat_map_fourier(regular_reshaped_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=3, in_ms=in_ms)
+        # plot_heat_map_fourier(regular_reshaped_arr, folder_path=file_folder_name, png_name=specific_file_name, stddev=3, in_ms=in_ms)
 
         # 2D plot comparing 3 types of filtering
         legends = ["lowpassed", "bandpassed", "unfiltered"]
@@ -1315,19 +1313,44 @@ if __name__ == "__main__":
         "src/app_v1/data_from_experiments/lower_resolution_longer_time_trials/sina/Pico/sina22.csv"
     ]
 
-    pico_file_names_gage_P1 = [
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/gage/gage_no_box/gage1.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/gage/gage_no_box/gage2.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/gage/gage_no_box/gage3.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/gage/gage_no_box/gage4.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/gage/gage_no_box/gage5.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/gage/gage_no_box/gage6.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/gage/gage_no_box/gage7.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/gage/gage_no_box/gage8.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/gage/gage_no_box/gage9.csv",
-        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/gage/gage_no_box/gage10.csv",
+    pico_file_names_rachel_P1 = [
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t1.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t2.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t3.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t4.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t5.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t6.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t7.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t8.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t9.csv",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/rachel/rachel_no_box/rachel_t10.csv"
     ]
 
+    pico_file_names_priya_P1 = [
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial1.txt",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial2.txt",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial3.txt",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial4.txt",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial5.txt",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial6.txt",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial7.txt",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial8.txt",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial9.txt",
+        "src/app_v1/data_from_experiments/reflex_by_subject/Pico/priya/priyatrial10.txt"
+    ]
+
+    rachel_two_cuff = [
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0001.csv",
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0002.csv",
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0003.csv",
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0004.csv",
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0005.csv",
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0006.csv",
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0007.csv",
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0008.csv",
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0009.csv",
+        "src/app_v1/data_from_experiments/two_cuff/rachel 2 cuff-0010.csv"
+    ]
     #####################################################################################################
     #####################################################################################################
     #####################################################################################################
@@ -1337,9 +1360,9 @@ if __name__ == "__main__":
     # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Example usage: Uncomment to analyze one experiment.
     #''' 
     # !!!!!!!!!!!!!!! User should edit: file_names, col_order, experiment_name as needed.
-    file_names = pico_file_names_gage_P1
-    col_order = [0, 2, 3, 1, 1, 1]  # time=col 0, hammer=col 3, transmitted=col 4, raw recieved=col 1, circuit env=col 2, emg=1 (dummy)
-    experiment_name = "Exp_Summary_Gage_P1"
+    file_names = rachel_two_cuff
+    col_order = [0, 3, 4, 1, 2, 1]  # time=col 0, hammer=col 3, transmitted=col 4, raw recieved=col 1, circuit env=col 2, emg=1 (dummy)
+    experiment_name = "Exp_Summary_rachel_two_cuff_calf"
     analyze_circuit_envelope = False
     analyze_calculated_envelope = True
     # !!!!!!!!!!!!!!!
