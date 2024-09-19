@@ -93,7 +93,9 @@ import matplotlib.gridspec as gridspec
 from matplotlib.widgets import RectangleSelector
 
 # Stuff for user to edit.
-ports = ['COM9', 'COM20']  # hammer port, cuff port
+ports = ['COM5', 'COM6']  # hammer port, cuff port
+# ON ALIENWARE RBERKUN ACCOUNT: pots = ['COM5', 'COM6']
+# ON RUTH PERSONAL LAPTOP: ports = ['COM9', 'COM20']
 baud_rate = 115200
 DATA_LENGTH =  200 # From cuff arduino
 read_live_data = True

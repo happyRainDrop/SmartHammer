@@ -23,7 +23,7 @@ import matplotlib.animation as animation
 from collections import deque
 
 ################################################################# From Cuff Arduino
-port1 = "COM20"  # Replace with your Arduino's serial port
+port1 = "COM6"  # Replace with your Arduino's serial port
 baudrate1 = 115200
 DATA_LENGTH = 200 # number of points per pulse 
 ################################################################
