@@ -1,6 +1,5 @@
 // 4-element transmit, recieve, and Wi-Fi code
 // Need to modify internal RAM files to work: https://github.com/arduino/ArduinoCore-mbed/pull/995/files
-
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiUDP.h>
@@ -19,38 +18,7 @@ volatile short pendingSaveRequests = 0;
 
 /////////////////////////////////////////// Recieving side things
 
-// Constants - WiFi
-const char* ssid = "Forest fire";
-const char* password = "firewall";
-const char* host = "192.168.235.237";  // Laptop IP
-const int hostPort = 4210;
-const int localPort = 2390;  // Port Arduino uses to send from
-
-// Misc variables
-WiFiUDP udp;
-String message = ""; // to transmit datas
-char buffer[50]; // Buffer for float to string conversion
-bool calibrating = false;
-bool checklights = true;
-
-// Constants - hammer
-const int NUM_READINGS_PAST_THRESH = 10;
-const float MAX_DEV = 0.75; // max deviation of analogRead in volts to trigger
-
-// Variables - hammer
-long hammerTriggeredTime = 0;
-double running_sum = 0;
-unsigned int num_hammer_samples = 0;
-
-// Variables - cuff
-int curr_data_it = 0;
-int start_data_it = 0;
-long mytime = 0;        // myTime used to determine time difference between analogReads
-long analogReadStartTime = 0;
-bool hammerTriggered = false;
-bool stopReading = false;
-
-// Simulatenous ADC
+// Constants - Simulatenous ADC
 const int ADC0Channel = A0; //ADC 1 channel -- hammer
 const int ADC1Channel = A1; //ADC 2 channel -- cuff1
 const int ADC2Channel = A2; //ADC 3 channel -- cuff2
@@ -62,14 +30,57 @@ const int SampleTime = 0; //0 to 7
 const int Samplenum = 0; //Number of samples, is 1 more, 0 to 1023
 bool Differential = 0; //A10 has to be used as input positive on giga r1, A11 as negative
 
+// Constants - WiFi
+const char* ssid = "Forest fire";
+const char* password = "firewall";
+const char* host = "192.168.235.237";  // Laptop IP
+const int hostPort = 4210;
+const int localPort = 2390;  // Port Arduino uses to send from
+
+// Constants - hammer
+const int NUM_READINGS_PAST_THRESH = 100;
+const float MAX_DEV = 0.18; // max deviation of analogRead in volts to trigger
+
 // Constants - cuff
 // pins
 const int CALIBRATION_PIN = 23;
 const int CHECKLIGHT_PIN = 51;
 // data
-const int DATA_LENGTH = 250;
-const int NUM_PULSES_TO_SAVE = 2000; // total # of pulses
+const int DATA_LENGTH = 260;
+const int DATA_LENGTH_BEFORE_HAMMER = 180;
+const int NUM_PULSES_TO_SAVE = 500; // total # of pulses
 const int NUM_PULSES_TO_SAVE_BEFORE_HAMMER = 5;
+
+// Wifi variables
+WiFiUDP udp;
+WiFiClient client;
+String message = ""; // to transmit datas
+char buffer[50]; // Buffer for float to string conversion
+bool calibrating = false;
+bool checklights = true;
+
+// TCP variables
+const int lenBuffer = 8000;
+const int linesPerPacket = 100;
+char packetBuffer[lenBuffer];
+int numPacketsSent = 0;
+int bufferIndex = 0;
+int lineCount = 0;
+
+// Variables - hammer
+long hammerTriggeredTime = 0;
+long lastHammerFinishedTime = 0;
+double running_sum = 0;
+unsigned int num_hammer_samples = 0;
+int true_data_length = DATA_LENGTH_BEFORE_HAMMER;
+
+// Variables - cuff
+int curr_data_it = 0;
+int start_data_it = 0;
+long mytime = 0;        // myTime used to determine time difference between analogReads
+long analogReadStartTime = 0;
+bool hammerTriggered = false;
+bool stopReading = false;
 
 // Data arrays, all in V (except time, in ms)
 // Use uint16_t and uint32_t for clarity
@@ -136,14 +147,179 @@ void setup() {
     ADCBegin(ADC2, ADC2Channel, Resolution, Differential, ClockSpeed, SampleTime, Samplenum);
     ResolutionSet(ADC1, Resolution);
     ResolutionSet(ADC2, Resolution);
-    Serial.println("Begin.");
+    // connectWifi();
+
+    delay(2000); // wait
 }
 
 /////////////////////////////////////////// Recieving side things
 
+bool sendPacketAndWaitForAck(uint8_t* data, int length, int numPacketsSent) {
+  const int MAX_RETRIES = 3;
+  int packetNum = numPacketsSent;
+  for (int retry = 0; retry < MAX_RETRIES; retry++) {
+    if (wired_connection) {
+      // Serial.print("📤 Sending packet #");
+      // Serial.print(packetNum);
+      // Serial.println();
+      if (retry > 0) {
+        Serial.print(" (retry ");
+        Serial.print(retry);
+        Serial.print(")");
+        Serial.println();
+      }
+    }
+
+    // Write data
+    char header[16];
+    snprintf(header, sizeof(header), "PACKET%d\n", numPacketsSent);
+    client.write((uint8_t *)header, strlen(header));
+    client.write((uint8_t *)data, length);
+
+    // Wait for ACK
+    unsigned long t_start = millis();
+    while (millis() - t_start < 5000) {
+      if (!client.connected()) {
+        if (wired_connection) Serial.println("⚠️ Client disconnected while waiting for ACK");
+        return false;
+      }
+
+      if (client.available()) {
+        String ack = client.readStringUntil('\n');
+        ack.trim();
+        String expectedAck = "ACK" + String(packetNum);
+        if (ack == expectedAck) {
+          // if (wired_connection) Serial.println("✅ " + ack + " received");
+          return true;
+        } else {
+          if (wired_connection) {
+            Serial.print("❌ Unexpected ACK: ");
+            Serial.println(ack);
+          }
+        }
+      }
+
+      delay(10);
+    }
+
+    Serial.println("⏱️ ACK wait timed out");
+  }
+  
+  if (wired_connection) {
+    Serial.print("❌ Failed to receive ACK for packet ");
+    Serial.println(packetNum);
+  }
+  return false;
+}
+
+void transmitOverTCP() {
+  /////////////////////////////////////////////////////////////////// WIFI STUFF
+  if (WiFi.status() != WL_CONNECTED) connectWifi();
+
+  if (!client.connected()) {
+    if (!client.connect(host, hostPort)) {
+      if (wired_connection) Serial.println("TCP connection failed.");
+      return;
+    }
+    if (wired_connection) Serial.println("TCP connected to host.");
+  }
+
+  /////////////////////////////////////////////////////////////////// CALCULATING DATA
+  int num_pulses_to_save = calibrating ? 1 : NUM_PULSES_TO_SAVE;
+  float time_to_print = 0;
+  float cuff1_voltage_to_print = 0;
+  float cuff2_voltage_to_print = 0;
+  float cuff3_voltage_to_print = 0;
+  float hammer_voltage_to_print = 0;
+  float emg_voltage_to_print = 0;
+
+  int i_initial = start_data_it * DATA_LENGTH;
+  int arr_len = DATA_LENGTH * num_pulses_to_save;
+  int which_it = start_data_it;
+  int last_it = -1;
+  long it_start = 0;
+  long it_end = 0;
+
+  for (int i = i_initial; i - i_initial < arr_len; i++) {
+    which_it = (i / DATA_LENGTH) % num_pulses_to_save;
+
+    if (which_it != last_it) {
+      it_start = start_and_end_times[which_it * 2];
+      it_end = start_and_end_times[which_it * 2 + 1];
+    }
+
+    int i_within_it = i % DATA_LENGTH;
+    int num_samples_this_period = DATA_LENGTH;
+    if (it_start < hammerTriggeredTime) num_samples_this_period = DATA_LENGTH_BEFORE_HAMMER;
+    time_to_print = ((i_within_it * 1.0 * (it_end - it_start)) / (num_samples_this_period*1.0)) / 1000.0 +
+                    (it_start - hammerTriggeredTime) / 1000.0;
+
+    if (it_start < hammerTriggeredTime && i_within_it >= DATA_LENGTH_BEFORE_HAMMER) {
+      // just print last time and voltage at the end of the file
+      time_to_print = ((DATA_LENGTH_BEFORE_HAMMER * 1.0 * (it_end - it_start)) / (num_samples_this_period*1.0)) / 1000.0 +
+                    (it_start - hammerTriggeredTime) / 1000.0;
+    } else {
+      cuff1_voltage_to_print = cuff_reciever_1_data[i % arr_len] * 3.3 / pow(2, Resolution);
+      cuff2_voltage_to_print = cuff_reciever_2_data[i % arr_len] * 3.3 / pow(2, Resolution);
+      cuff3_voltage_to_print = cuff_reciever_3_data[i % arr_len] * 3.3 / pow(2, Resolution);
+      emg_voltage_to_print = emg_data[which_it] * 3.3 / pow(2, Resolution);
+    }
+
+    if (hammer_data[i % arr_len] != 0)
+      hammer_voltage_to_print = hammer_data[i % arr_len] * 3.3 / pow(2, Resolution);
+      
+    ///////////////////////////////////////////////////////////////////// SENDING DATA
+
+    char line[100];
+    snprintf(line, sizeof(line),
+             "%.6f, %.3f, %.3f, %.3f, %.3f, %.3f\n",
+             time_to_print, cuff1_voltage_to_print, cuff2_voltage_to_print,
+             cuff3_voltage_to_print, hammer_voltage_to_print, emg_voltage_to_print);
+
+    int lineLen = strlen(line);
+    if (bufferIndex + lineLen < lenBuffer) {
+      memcpy(packetBuffer + bufferIndex, line, lineLen);
+      bufferIndex += lineLen;
+      lineCount++;
+    } else {
+      if (wired_connection) {
+        Serial.print("Error: bufferIndex = ");
+        Serial.print(bufferIndex);
+        Serial.print(" + lineLen = ");
+        Serial.print(lineLen);
+        Serial.print(">=");
+        Serial.println(lenBuffer);
+      }
+    }
+
+    if (lineCount == linesPerPacket) {
+      if (!sendPacketAndWaitForAck((uint8_t*)packetBuffer, bufferIndex, numPacketsSent)) {
+        // Could retry here more globally, or just give up
+        if (wired_connection) Serial.println("  Couldn't send packet. Aborting.");
+        client.stop();
+        return;
+      }
+      bufferIndex = 0;
+      lineCount = 0;
+      numPacketsSent++;
+    }
+
+    last_it = which_it;
+  }
+
+  if (lineCount > 0) {
+    client.write((uint8_t *)packetBuffer, bufferIndex);
+  }
+
+  // Send end marker
+  client.write("============\n");
+  client.stop();
+}
+
 void transmitOverUDP() {
 
   if (WiFi.status() != WL_CONNECTED) connectWifi();
+  udp.begin(localPort);
 
   // Set up output buffers
   const int linesPerPacket = 10;
@@ -302,13 +478,16 @@ void transmitOverSerial() {
 }
 
 void connectWifi() {
+  if (wired_connection) {
+    Serial.print("Attempting to connect to Wifi: ");
+    Serial.println(ssid);
+  }
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     if (wired_connection) Serial.print(".");
   }
   if (wired_connection) Serial.println("\nWiFi connected!");
-  udp.begin(localPort);
 }
 
 void saveData() {
@@ -322,7 +501,10 @@ void saveData() {
     ADCChangeChannel(ADC2, ADC2Channel);
 
     // stream cuff and hammer data
-    for (int i = 0; i < DATA_LENGTH; i++) {
+    if (hammerTriggered) true_data_length = DATA_LENGTH;
+    else true_data_length = DATA_LENGTH_BEFORE_HAMMER;
+
+    for (int i = 0; i < true_data_length; i++) {
       cuff_reciever_1_data_SRAM[i] = CatchADCValue(ADC1);
       cuff_reciever_2_data_SRAM[i] = CatchADCValue(ADC2);
       ADCChangeChannel(ADC1, ADC3Channel);
@@ -333,7 +515,7 @@ void saveData() {
         ADCChangeChannel(ADC2, ADC0Channel);
         hammer_data_SRAM[i] = CatchADCValue(ADC2); // read the hammer pin
         ADCChangeChannel(ADC2, ADC2Channel);
-      }
+      } else hammer_data_SRAM[i] = 0;
     } 
 
     // UPDATE TIMES
@@ -351,31 +533,18 @@ void saveData() {
     // Check if the hammer was triggered during this time?
     // We will check this even if the hammer is already triggered, for a constant delay time.
     if (hammerTriggered == false) {
-      int checking_ham_start_it = curr_data_it * DATA_LENGTH;
-      int checking_ham_it = 0;
-      int checking_exceeds_ham_it = 0;
-      for (int i = 0; i < DATA_LENGTH - NUM_READINGS_PAST_THRESH; i++) {
-        checking_ham_it = checking_ham_start_it + i;
-        boolean this_is_the_trigger_it = true;
-        running_sum += hammer_data[checking_ham_it];
-        num_hammer_samples += 1;
-
-        // look at the next NUM_READINGS_PAST_THRESH and see if they are all larger than the 
-        // running average
-        for (int j = 1; j <= NUM_READINGS_PAST_THRESH; j++) {
-          checking_exceeds_ham_it = checking_ham_it + j;
-          if ((3.3*hammer_data[checking_exceeds_ham_it]/pow(2, Resolution)) - 
-          ((3.3*running_sum)/(float(num_hammer_samples)*pow(2, Resolution))) < MAX_DEV) 
-            this_is_the_trigger_it = false;
-        }
-
+      int aboveThreshInARow = 0;
+      
+      for (int i = 0; i < DATA_LENGTH_BEFORE_HAMMER; i++) {
+        if ((3.3*hammer_data_SRAM[i]/pow(2, Resolution)) > MAX_DEV) aboveThreshInARow += 1;
+        else aboveThreshInARow = 0;
+        
         // save the time if triggered. The only thing that will actually change the array.
-        if (this_is_the_trigger_it && !hammerTriggered) {
-          hammerTriggered = true;
-
+        if (aboveThreshInARow >= NUM_READINGS_PAST_THRESH) {
           unsigned int cuffCycleStartTime = start_and_end_times[curr_data_it * 2];
           unsigned int cuffCycleEndTime = start_and_end_times[curr_data_it * 2 + 1];  
-          hammerTriggeredTime = cuffCycleStartTime + float(cuffCycleEndTime - cuffCycleStartTime)/DATA_LENGTH * i;
+          hammerTriggeredTime = cuffCycleStartTime + i*float(cuffCycleEndTime-cuffCycleStartTime)/DATA_LENGTH_BEFORE_HAMMER;
+          hammerTriggered = true;
         }
       }
     }
@@ -384,7 +553,7 @@ void saveData() {
     if (calibrating) curr_data_it = 0;
     else curr_data_it = (curr_data_it + 1) % NUM_PULSES_TO_SAVE;
 
-    pendingSaveRequests -= 1;
+    pendingSaveRequests = 0; // ASSUME IT TOOK LESS TIME TO SAVE DATA THAN FOR NEXT INTERRUPT TO ARRIVE
 }
 
 void loop() {
@@ -400,7 +569,7 @@ void loop() {
         break;
       }
     }
-    transmitOverUDP();
+    transmitOverTCP();
 
   } else {
 
@@ -430,15 +599,16 @@ void loop() {
 
         // lastly, print the data.
         if (wired_connection) Serial.println("starting transmit");
-        transmitOverUDP();
+        transmitOverTCP();
         if (wired_connection) Serial.println("ending transmit");
 
-        // show on the checklight we're done reading
-        digitalWriteFast(CHECKLIGHT_PIN, LOW);
-
-        delay(5000); // wait 5 second before checking for another pulse
+        delay(2000); // wait 3 second before checking for another pulse
         pendingSaveRequests = 0;
+        curr_data_it = 0;
         hammerTriggered = false;
+
+        // show on the checklight we're ready for another pulse
+        digitalWriteFast(CHECKLIGHT_PIN, LOW);
 
     } else {
       while (true) {
