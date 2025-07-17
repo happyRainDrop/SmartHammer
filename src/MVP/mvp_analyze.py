@@ -1,6 +1,6 @@
 '''
 Name: mvp_analyze.py
-Last updated: 7/11/25 by Ruth Berkun
+Last updated: 7/15/25 by Ruth Berkun
 
 Table of contents:
     Functions to parse Arduino Wifi data:
@@ -269,52 +269,67 @@ def get_reshaped_array_from_arduino_csv(output_file, DATA_LENGTH, use_emg = Fals
         DATA_LENGTH: How many data points saved per recieved pulse in the cuff Arduino
         use_emg: Consider emg data (third col of hammer csv)
     Outputs:
-        [hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, time_ticks, NUM_PULSES]
+        [hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_1_reshaped, 
+        cuff_recieved_2_reshaped, cuff_recieved_3_reshaped, time_ticks, NUM_PULSES]
         hammer_times: Hammer times in ms. First col of hammer csv
         hammer_recieved: Hammer Arduino recieved voltages (V). Second col of hammer csv
         emg_recieved: EMG data in voltages (V), empty array if use_emg = False
         cuff_times_reshaped:[[times of recieved pulse 1], [times of recieved pulse 2],...]
-        cuff_recieved_reshaped: [[voltages of recieved pulse 1], [voltages of recieved pulse 2],...]
+        cuff_recieved_1_reshaped: [[voltages of recieved pulse 1], [voltages of recieved pulse 2],...]
+        cuff_received_2_reshaped, cuff_received_3_reshaped: same as cuff_recieved_1 reshaped except
+            for transducers 2 and 3 instead of transducer 1
         time_ticks: Used on heat maps -- the starting time of each pulse.
         NUM_PULSES: Number of recieved pulses detected in the cuff data. 
     '''
     my_csv = pd.read_csv(output_file, header=None).to_numpy()
 
     cuff_times = my_csv[:,0]
-    cuff_recieved = my_csv[:,2]
+    cuff_recieved_1 = my_csv[:,1]
+    cuff_recieved_2 = my_csv[:,2]
+    cuff_recieved_3 = my_csv[:,3]
     hammer_recieved = my_csv[:,4]
     hammer_times = cuff_times
     emg_recieved = my_csv[:,5]
     
-    NUM_PULSES = int(len(cuff_recieved) / DATA_LENGTH)
+    NUM_PULSES = int(len(cuff_recieved_1) / DATA_LENGTH)
     print(f"{NUM_PULSES} recieved pulses found.")
 
     # Reshape by pulse (NUM_PULSES rows, DATA_LENGTH columns)
     cuff_times_reshaped = []
-    cuff_recieved_reshaped = []
+    cuff_recieved_1_reshaped = []
+    cuff_recieved_2_reshaped = []
+    cuff_recieved_3_reshaped = []
     time_ticks = []
     i = 0
     for r in range(NUM_PULSES):
         cuff_pulse_times = []
-        cuff_pulse_data = []
+        cuff_pulse_data_1 = []
+        cuff_pulse_data_2 = []
+        cuff_pulse_data_3 = []
         
         for c in range(DATA_LENGTH):
             cuff_pulse_times.append(cuff_times[i])
-            cuff_pulse_data.append(cuff_recieved[i])
+            cuff_pulse_data_1.append(cuff_recieved_1[i])
+            cuff_pulse_data_2.append(cuff_recieved_2[i])
+            cuff_pulse_data_3.append(cuff_recieved_3[i])
             i+=1
         
         cuff_times_reshaped.append(cuff_pulse_times)
-        cuff_recieved_reshaped.append(cuff_pulse_data)
+        cuff_recieved_1_reshaped.append(cuff_pulse_data_1)
+        cuff_recieved_2_reshaped.append(cuff_pulse_data_2)
+        cuff_recieved_3_reshaped.append(cuff_pulse_data_3)
         time_ticks.append(round(cuff_pulse_times[0], 2))
 
-    return [hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, time_ticks, NUM_PULSES]
+    return [hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_1_reshaped, 
+            cuff_recieved_2_reshaped, cuff_recieved_3_reshaped, time_ticks, NUM_PULSES]
 
 def plot_heat_map(input_files, folder_path = files_folder_path, png_name = "cuff_hammer_emg_combined", stddev = 3, use_emg = False, normalize_to_initial = True):
     '''
     Plots hammer hit versus cuff heatmap, and allows user to select an area to search for the maximum intensity in. \n
 
     Inputs: \n
-        input_files: [hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_reshaped, time_ticks, NUM_PULSES]
+        input_files: [hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, 
+        cuff_recieved_1_reshaped, cuff_recieved_2_reshaped, cuff_recieved_3_reshaped, time_ticks, NUM_PULSES]
             hammer_times: Hammer times in ms. First col of hammer csv
             hammer_recieved: Hammer Arduino recieved voltages (V). Second col of hammer csv
             emg_recieved: EMG data in voltages (V), empty array if use_emg = False
@@ -332,18 +347,26 @@ def plot_heat_map(input_files, folder_path = files_folder_path, png_name = "cuff
     '''
     
     # Retrieve the data we need for the heat map
-    start_index = 5
+    start_index = 0
     hammer_times = input_files[0][start_index:]
     hammer_recieved = input_files[1][start_index:]
     emg_recieved = input_files[2][start_index:]
     cuff_times_reshaped = input_files[3][start_index:]
-    cuff_recieved_reshaped = input_files[4][start_index:]
-    time_ticks = input_files[5][start_index:]
-    NUM_PULSES = input_files[6]
+    cuff_recieved_1_reshaped = input_files[4][start_index:]
+    cuff_recieved_2_reshaped = input_files[5][start_index:]
+    cuff_recieved_3_reshaped = input_files[6][start_index:]
+    time_ticks = input_files[7][start_index:]
+    NUM_PULSES = input_files[8]
+
+    # Filter (smoothen heatplot)
+    cuff_recieved_1_reshaped = uniform_filter1d(cuff_recieved_1_reshaped, size=20, axis=0, mode='nearest')
+    cuff_recieved_2_reshaped = uniform_filter1d(cuff_recieved_2_reshaped, size=20, axis=0, mode='nearest')
+    cuff_recieved_3_reshaped = uniform_filter1d(cuff_recieved_3_reshaped, size=20, axis=0, mode='nearest')
+    cuff_recieved_reshaped = [cuff_recieved_1_reshaped, cuff_recieved_2_reshaped, cuff_recieved_3_reshaped]
 
     # Plot using GridSpec
     fig = plt.figure(figsize=(6, 8))
-    gs = gridspec.GridSpec(3, 1, height_ratios=[1, 1, 0.05])
+    gs = gridspec.GridSpec(5, 1, height_ratios=[0.5, 1, 1, 1, 0.05])
 
     # Hammer and EMG signal subplot
     ax1 = plt.subplot(gs[0])
@@ -356,23 +379,34 @@ def plot_heat_map(input_files, folder_path = files_folder_path, png_name = "cuff
     ax1.set_xlabel('Time (ms)')
     ax1.legend()
 
-    # Cuff signal subplot
-    ax2 = plt.subplot(gs[1])
-    cuff_vals_for_heatmap = np.asarray(cuff_recieved_reshaped)
-    if (normalize_to_initial): 
-        cuff_vals_for_heatmap = np.asarray(cuff_recieved_reshaped) - np.asarray(cuff_recieved_reshaped)[0, :]
-    lower_outliers, upper_outliers, lower_lim_imshow, upper_lim_imshow = find_outliers_std(cuff_vals_for_heatmap, stddev)
-    im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=lower_lim_imshow, vmax=upper_lim_imshow)
-    ax2.set_title('Circuit envelope: \nPulse height vs time normalize to start of pulse, all pulses overlayed')
-    ax2.set_ylabel('Array index within pulse')
-    ax2.set_xlabel('Start time of pulse (ms)')
-    time_tick_positions = np.arange(0, NUM_PULSES, NUM_PULSES / len(time_ticks))
-    ax2.set_xticks(ticks=time_tick_positions[0::5])
-    ax2.set_xticklabels(labels=time_ticks[0::5])
-    ax2.tick_params(axis='x', rotation=90)
+    # Color map: Set color/voltage limits for all 3 signals
+    # Stack all data arrays to find global color scale
+    all_cuff_data = np.array(cuff_recieved_reshaped)
+    if normalize_to_initial:
+        all_cuff_data = all_cuff_data - all_cuff_data[-1, :]
+    # Concatenate all for joint outlier detection
+    combined_data = np.concatenate(all_cuff_data, axis=0)
+    lower_outliers, upper_outliers, global_vmin, global_vmax = find_outliers_std(combined_data, stddev)
+
+    # Each transducer signal subplot
+    im = None
+    for i in range(len(cuff_recieved_reshaped)):
+        ax2 = plt.subplot(gs[i+1])
+        cuff_vals_for_heatmap = np.asarray(cuff_recieved_reshaped[i])
+        if (normalize_to_initial): 
+            cuff_vals_for_heatmap = np.asarray(cuff_vals_for_heatmap) - np.asarray(cuff_vals_for_heatmap)[-1, :]
+        lower_outliers, upper_outliers, lower_lim_imshow, upper_lim_imshow = find_outliers_std(cuff_vals_for_heatmap, stddev)
+        im = ax2.imshow(np.transpose(cuff_vals_for_heatmap), aspect='auto', cmap='jet', vmin=global_vmin, vmax=global_vmax)
+        ax2.set_title(f'Transducer {i+1} Circuit envelope')
+        ax2.set_ylabel('Arr. indx w/in pulse')
+        ax2.set_xlabel('Start time of pulse (ms)')
+        time_tick_positions = np.arange(0, NUM_PULSES, NUM_PULSES / len(time_ticks))
+        ax2.set_xticks(ticks=time_tick_positions[0::150])
+        ax2.set_xticklabels(labels=time_ticks[0::150])
+        ax2.tick_params(axis='x', rotation=0)
 
     # Colorbar subplot
-    cbar_ax = plt.subplot(gs[2])
+    cbar_ax = plt.subplot(gs[-1])
     fig.colorbar(im, cax=cbar_ax, orientation='horizontal')
 
     ############################################################# Stuff to select area and find max point
@@ -438,6 +472,7 @@ def plot_heat_map(input_files, folder_path = files_folder_path, png_name = "cuff
                 max_amplitude_heat_map = np.abs(amplitude_diff)
                 reflex_time = cuff_times_reshaped[r][c]
     print(f"Auto-detect found: Maximum muscle contraction found at {reflex_time} ms after hammer hit.")
+
 
 if __name__ == "__main__":
     
