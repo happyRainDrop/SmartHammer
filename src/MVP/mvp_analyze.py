@@ -1,10 +1,12 @@
 '''
 Name: mvp_analyze.py
-Last updated: 7/15/25 by Ruth Berkun
+Last updated: 7/18/25 by Ruth Berkun
 
 Table of contents:
     Functions to parse Arduino Wifi data:
-        get_wifi_data():
+        write_samples(buf, writer):
+            Helps read_from_TCP write in the floats in the buffer in the correct format for CSV
+        read_from_TCP():
             Reads in data from Arduino and saves it to a CSV
     Functions to analyze cuff data:
         get_reshaped_array_from_arduino_csv(output_files, DATA_LENGTH, use_emg = False):
@@ -17,22 +19,18 @@ Instructions for use:
     RUNNING A LIVE EXPERIMENT: 
         In testing mode:
             Connect to Wifi (currently Ruth's hotspot, "Forest fire")
-            Set read_live_data to true
-                
-            Run python mvp_analyze.py in terminal.
-            1. Do NOT hit the hammer until the terminal prints
-                Starting TCP server on port 4210...
-                Waiting for connection from Arduino...
-
-                It shoulnd't print anything after that if you're not hitting the hammer.
-                If it prints something, close the terminal and restart the program.
+            Set read_live_data to true and run python mvp_analyze.py
+            OR, just run python mvp_analyze.py --live_mode in terminal. 
+            1. Wait for connection.
+                📡 TCP server listening on 0.0.0.0:4210
 
             2. Hit the hammer on the table. (If triggered, checklight will turn on)
                 It should now print something like
-                Connected by ('192.168.235.110', 55104)
+                ✅ Connected by ('10.60.225.147', 53533)
+                Recieving packets... ━━╺━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━   5% 0:01:51
                 (May take a while -- Arduino needs to connect to WiFi first)
 
-                If it's not printing anything, the connection is  didn't trigger, try hitting it harder.
+                If it's not printing anything, the connection is not working. Try power cycling Arduino.
 
             3. Wait until prints "Proceeding to analyze the CSV files."
             On the picture that pops up, click and drag a rectangle of the region you want to find the max
@@ -40,34 +38,43 @@ Instructions for use:
             Close the image, and the program will complete, and save to the location you specified
 
             4. Example of what is printed to terminal on a successful run:
+            📡 TCP server listening on 0.0.0.0:4210
+            ✅ Connected by ('10.60.225.147', 53533)
+            📝 Finished writing logs/Arduino_test.csv in 114.1 seconds.
+            Recieving packets... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 0:00:00
+            2000 recieved pulses found.
+            Reading logs/Arduino_test.csv
+            Saving to: logs/test.png
 
         To specify folder path and or file name to save csv and png files under: 
-            Run python cuff_hammer_app_v1.py --filename_suffix DESIRED_NAME --folder_path DESIRED_FOLDER_PATH
+            Run python cuff_hammer_app_v1.py --filename_suffix DESIRED_NAME --folder_path DESIRED/FOLDER/PATH/
+            It will save in "DESIRED/FOLDER/PATH/Arduino_DESIRED_NAME.csv".
 
     ANALYZING PREVIOUS EXPERIMENT DATA:
-        Set read_live_data to false
+        Set read_live_data to false, or run with the --readback_mode suffix.
         Run python cuff_hammer_app_v1.py --filename_suffix DESIRED_NAME --folder_path
         For example, if you want to analyze folder1/hammer_test.csv and folder1/cuff_test.csv, you would run
             python cuff_hammer_app_v1.py --filename_suffix test --folder_path folder1
 '''
 
-import socket
-
+import socket, struct, os, csv
 import numpy as np
 import matplotlib.pyplot as plt
-import csv
 import pandas as pd
 import time
-from scipy.ndimage import uniform_filter1d
+import re
+import math
 
 import argparse
 import matplotlib.gridspec as gridspec
+from rich.progress import Progress
+from scipy.ndimage import uniform_filter1d
 
 from matplotlib.widgets import RectangleSelector
 
 # Stuff for user to edit
-DATA_LENGTH =  260 # From cuff arduino
-read_live_data = True
+DATA_LENGTH =  260 # From cuff arduino: number of sensor readings per pulse
+read_live_data = False
 demo_mode = False       # Use it to pretend to generate a heat map on the spot, but
                         # it actually just pulls up Sina's old reflex :p
 
@@ -75,165 +82,125 @@ demo_mode = False       # Use it to pretend to generate a heat map on the spot, 
 files_folder_path = 'logs/'
 file_name = 'test'
 
+# Other information hard-coded in the Arduino
+HEADER_RE   = re.compile(br'^PACKET(\d+)\n')    # what do we send at the start of a packet?
+NUM_PULSES_TO_SAVE = 2000
+SAMPLES_PER_PACKET = 500
+NUM_CHANNELS = 6                                # how many numbers in each line of the CSV?
+TOTAL_PACKETS_EXPECTED = math.floor(NUM_PULSES_TO_SAVE * DATA_LENGTH / SAMPLES_PER_PACKET)
+BYTES_PER_SAMPLE = 4 * NUM_CHANNELS
+BYTES_PER_PACKET = BYTES_PER_SAMPLE * SAMPLES_PER_PACKET
+
 ##################################################################################################################################
+
+def write_samples(buf, writer):
+    """Write full samples from buf to CSV; each sample = 6 floats"""
+    num_samples = len(buf) // BYTES_PER_SAMPLE
+    for i in range(num_samples):
+        offset = i * BYTES_PER_SAMPLE
+        sample = struct.unpack('<6f', buf[offset:offset + BYTES_PER_SAMPLE])
+        # Write with custom formatting: 6 decimals for time, 3 for others
+        writer.writerow([f"{sample[0]:.6f}"] + [f"{v:.3f}" for v in sample[1:]])
+    del buf[:num_samples * BYTES_PER_SAMPLE]  # consume written bytes
 
 def read_from_TCP(filename):
     """
-    Through a TCP connection to the Arduino Giga, saves data transmitted to CSV
+    Connects to Arduino through a TCP socket connection.
+    Arduino sends samples of 4-byte floats over Wi-Fi, each sample has NUM_CHANNELS floats
+    Arduino sends these samples in packets with SAMPLES_PER_PACKET samples each
+    read_from_TCP processes these packets, tells the Arduino it recieved them, and sends them.
     Inputs:
-        filename -- path to save to
+        filename: full path of where to save the CSV.
     Ouputs:
-        CSV at specified file and folder path
+        CSV of Arduino values (time in ms, cuff_1_voltage, cuff_2_voltage, cuff_3_voltage, 
+            hammer_voltage, emg_voltage)
     """
-    HOST = '0.0.0.0'
-    PORT = 4210
-    LINES_PER_PACKET = 100
-    CSV_FILENAME = filename
-    current_packet_id = 0
-    last_acked_id = -1
-    start_time = 0
+    host, port = '0.0.0.0', 4210
+    os.makedirs(os.path.dirname(filename) or ".", exist_ok=True)
 
-    print(f"Starting TCP server on port {PORT}...")
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv, \
+         open(filename, 'w', newline='') as fout:
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-        server_socket.bind((HOST, PORT))
-        server_socket.listen(1)
-        print("Waiting for connection from Arduino...")
+        writer = csv.writer(fout)
+        # writer.writerow(["time_sec", "cuff1_V", "cuff2_V", "cuff3_V", "hammer_V", "emg_V"])
 
-        conn, addr = server_socket.accept()
-        start_time = time.time()
-        print(f"Connected by {addr}")
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind((host, port));  srv.listen(1)
+        print(f"📡 TCP server listening on {host}:{port}")
+        conn, addr = srv.accept()
+        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        print(f"✅ Connected by {addr}")
+        
 
-        buffer = b""
-        linesToWrite = []
+        with Progress() as progress:
+            task = progress.add_task("[green]Recieving packets...", total=TOTAL_PACKETS_EXPECTED)
 
-        packet_start_time = time.time()
-        csv_start_time = time.time()
+            start_time = time.time()
+            data_bin_buf = bytearray()
+            total_bin_buf = bytearray()
+            last_acked_packet = -1
 
-        with open(CSV_FILENAME, 'w') as f:
-            while True:
-                data = conn.recv(65536)
-                if not data:
-                    print("Connection closed.")
-                    break
+            try:
+                while True:
 
-                buffer += data
-                lines = buffer.split(b'\n')
-                buffer = lines[-1]  # Keep last partial line
+                    # 1. Get data in  (raw bytes)
+                    data = conn.recv(8192)
+                    if not data:
+                        write_samples(data_bin_buf, writer)  # flush remaining
+                        break
 
-                for line in lines[:-1]:
-                    try:
-                        line_str = line.decode('utf-8').strip()
-                    except UnicodeDecodeError:
-                        continue
+                    total_bin_buf.extend(data)
 
-                    if "====" in line_str:
-                        print("✅ End-of-stream received. Exiting.")
-                        conn.close()
-                        start_time = time.time() - start_time
-                        print(f"Elapsed time for TCP transmit: {start_time} seconds")
-                        return
+                    # 2. Search for header and process bytes between headers. Give up 
+                    # when we've found all headers
+                    while (HEADER_RE.search(total_bin_buf) is not None):
+                        header = HEADER_RE.search(total_bin_buf)
 
-                    if line_str.startswith("PACKET"):
-                        try:
-                            current_packet_id = int(line_str[6:].strip())
-                            lines_in_packet = 0
-                            #packet_start_time = time.time()
-                            # print(f"📦 PACKET {current_packet_id}")
-                        except ValueError:
-                            continue
+                        # Process: any bytes that came in BEFORE the header
+                        hdr_start_index, hdr_end_index = header.span()
+                        data_bin_buf.extend(total_bin_buf[:hdr_start_index])    # push bytes to data_bin_buf
+                        pkt_no = int(header.group(1))
+                        payload = data_bin_buf[:BYTES_PER_PACKET]
 
-                    elif line_str.count(',') == 5 and current_packet_id is not None:
-                        lines_in_packet += 1
-                        linesToWrite.append(line_str)
-                        if lines_in_packet >= LINES_PER_PACKET and current_packet_id != last_acked_id:
-                            
-                            #packet_start_time = time.time() - packet_start_time
-                            #print(f"  Read in 1 packet: {packet_start_time*1000} ms")
+                        if len(payload) == BYTES_PER_PACKET:
+                            if (last_acked_packet != pkt_no):
+                                write_samples(payload, writer)
+                                conn.sendall(f"ACK{pkt_no}\n".encode())
+                                # print(f"✅ ACK{pkt_no}")
+                                progress.update(task, advance=1)
+                            else:
+                                print("Warning: repeat packet {pkt_no}, ignoring.")
+                            last_acked_packet = pkt_no
+                            data_bin_buf = data_bin_buf[BYTES_PER_PACKET:]  # remove written part
 
-                            # Batch write to CSV
-                            #packet_start_time = time.time()
-                            for i in range(LINES_PER_PACKET):
-                                f.write(linesToWrite[i] + '\n')
-                            linesToWrite = []
-                            packet_start_time = time.time() - packet_start_time
-                            #print(f"  CSV write in 1 packet: {packet_start_time*1000} ms")
+                        # Remove header so next iteration we can look for bytes before next header
+                        total_bin_buf = total_bin_buf[hdr_end_index:]  # remove those bytes from total_bin_buf
 
-                            # Send ACK
-                            ack_msg = f"ACK{current_packet_id}\n".encode('utf-8')
-                            # print("\tACK"+str(current_packet_id))
-                            conn.sendall(ack_msg)
-                            last_acked_id = current_packet_id
-                    
-                    else:
-                        print(f"!! Malformed line: {line_str}")
+                    # 3. Write all bytes that came after the last header.
+                    data_bin_buf.extend(total_bin_buf)
+                    total_bin_buf = bytearray()
+                    while (len(data_bin_buf) >= BYTES_PER_PACKET):
+                        payload = data_bin_buf[:BYTES_PER_PACKET]
+                        if len(payload) == BYTES_PER_PACKET:
+                            if (last_acked_packet != pkt_no):
+                                write_samples(payload, writer)
+                                conn.sendall(f"ACK{pkt_no}\n".encode())
+                                # print(f"✅ ACK{pkt_no}")
+                                progress.update(task, advance=1)
+                            else:
+                                print("Warning: repeat packet {pkt_no}, ignoring.")
+                            last_acked_packet = pkt_no
+                            data_bin_buf = data_bin_buf[BYTES_PER_PACKET:]  # remove written part
 
-
-def read_from_UDP(filename):
-    """
-    Listens for UDP packets from an Arduino and saves received data to a CSV file
-    when a termination line containing '==' is received.
     
-    Parameters:
-        filename (str): Filename for the output CSV file.
-    """
-    import socket
 
-    PORT = 4210
-    LINES_PER_PACKET = 10
-    CSV_FILENAME = filename
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(('', PORT))
-    sock.settimeout(300.0) # 5-minute timeout before stop listening
-    print("Listening for UDP packets...")
-
-    with open(CSV_FILENAME, 'w') as f:
-        current_packet = None
-        lines_in_packet = 0
-        last_acked = -1
-        buffer = b""
-
-        while True:
-            data, addr = sock.recvfrom(65536)
-            
-            buffer += data
-            lines = buffer.split(b'\n')
-            buffer = lines[-1]  # Keep last partial line
-
-            for line in lines:
-                try:
-                    line_str = line.decode('utf-8').strip()
-                except UnicodeDecodeError:
-                    continue
-
-                # print(line_str)
-
-                if "====" in line_str:
-                    print("✅ End-of-stream received.")
-                    exit()
-
-                elif line_str.startswith("PACKET"):
-                    try:
-                        current_packet = int(line_str[6:].strip())
-                        lines_in_packet = 0
-                        # print(f"📦 PACKET {current_packet}")
-                    except ValueError:
-                        # print(f"⚠️ Malformed PACKET line: {line_str}")
-                        continue
-
-                elif line_str.count(',') == 5 and current_packet is not None:
-                    f.write(line_str + '\n')
-                    lines_in_packet += 1
-                    if lines_in_packet >= LINES_PER_PACKET and current_packet != last_acked:
-                        ack = f"ACK{current_packet}"
-                        sock.sendto(ack.encode(), addr)
-                        last_acked = current_packet
-
-                elif len(line_str) > 0:
-                    print(f"!! Malformed line: {line_str}")
+            finally:
+                duration = time.time() - start_time
+                print(f"📝 Finished writing {filename} in {duration:.1f} seconds.")
+                conn.close()
                 
 ##################################################################################################################################
+
 
 def find_outliers_std(data, threshold=3):
     '''
@@ -483,12 +450,17 @@ if __name__ == "__main__":
                     description='What the program does',
                     epilog='Text at the bottom of help')
 
-    parser.add_argument('--filename_suffix', type=str, help = 'appended to name of hammer,cuff csvs (do not include .csv postfix)') 
+    parser.add_argument('--filename_suffix', type=str, help = 'appended to name of csvs (do not include .csv postfix)') 
     parser.add_argument('--folder_path', type=str, help='to change the default path (can insert full or relative path)', nargs='?') 
+    parser.add_argument('--live_mode', action='store_true', help='Set read_live_data to True')
+    parser.add_argument('--readback_mode', action='store_true', help='Set read_live_data to False') 
 
     args = parser.parse_args()
     if args.folder_path is not None: files_folder_path = args.folder_path
     if args.filename_suffix is not None: file_name = str(args.filename_suffix)
+    if args.live_mode: read_live_data  = True
+    if args.readback_mode: read_live_data  = False
+    
 
     output_file = files_folder_path+'Arduino_'+file_name+'.csv'
 
@@ -506,7 +478,7 @@ if __name__ == "__main__":
     #'''
     
     #'''
-    data_arrays = get_reshaped_array_from_arduino_csv("logs/Arduino_test.csv", DATA_LENGTH)
+    data_arrays = get_reshaped_array_from_arduino_csv(output_file, DATA_LENGTH)
     print(f"Reading {output_file}")
     plot_heat_map(data_arrays, png_name=file_name, folder_path=files_folder_path)
     #s'''
