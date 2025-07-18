@@ -18,7 +18,7 @@ Table of contents:
 Instructions for use: 
     RUNNING A LIVE EXPERIMENT: 
         In testing mode:
-            Connect to Wifi (currently Ruth's hotspot, "Forest fire")
+            Connect to Wifi (currently Ruth's hotspot, "Forest fire", pwd: "firewall")
             Set read_live_data to true and run python mvp_analyze.py
             OR, just run python mvp_analyze.py --live_mode in terminal. 
             1. Wait for connection.
@@ -428,12 +428,13 @@ def plot_heat_map(input_files, folder_path = files_folder_path, png_name = "cuff
     plt.close(fig)
     
     # Return time of reflex
-    min_reflex_time = 28 # in ms
-    max_reflex_time = 50 # in ms
+    min_reflex_time = 50 # in ms
+    max_reflex_time = 200 # in ms
     min_reflex_index_within_pulse = 30
     reflex_time = 0
     max_amplitude_heat_map = 0
-    for r in range(NUM_PULSES):
+    cuff_recieved_reshaped = cuff_recieved_reshaped[1]  # find reflex from transducer 2
+    for r in range(len(cuff_times_reshaped)):
         for c in range(min_reflex_index_within_pulse, len(cuff_recieved_reshaped[r])):
             amplitude_diff = cuff_recieved_reshaped[r][c] - cuff_recieved_reshaped[0][c]
             if (cuff_times_reshaped[r][c] < min_reflex_time or cuff_times_reshaped[r][c] > max_reflex_time): continue
