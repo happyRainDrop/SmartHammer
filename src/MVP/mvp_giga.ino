@@ -11,7 +11,7 @@
 bool wired_connection = true;
 bool testing_timing = true;
 volatile bool turn_on_osc_pin_state = false;
-const int TURN_ON_OSC_PIN = 3;
+const int TURN_ON_OSC_PIN = 53;
 const int MAX_TIMER_CYCLES = 108; // 52*2 kHz timer --> 1 ms passes after 108 cycles
 const int MAX_NUM_PULSES = 10; // send a burst of 10 square waves
 int numTimerCyclesPassed = -1;
@@ -34,7 +34,7 @@ bool Differential = 0; //A10 has to be used as input positive on giga r1, A11 as
 // Constants - WiFi
 const char* ssid = "Forest fire";
 const char* password = "firewall";
-const char* host = "192.168.235.237";  // Laptop IP
+const char* host = "10.83.186.237";  // Laptop IP
 const int hostPort = 4210;
 const int localPort = 2390;  // Port Arduino uses to send from
 
