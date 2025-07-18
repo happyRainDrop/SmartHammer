@@ -8,10 +8,10 @@
 #include "SDRAM.h"
 
 /////////////////////////////////////////// Transmission side things
-bool wired_connection = true;
-bool testing_timing = true;
+bool wired_connection = false;
+bool testing_timing = false;
 volatile bool turn_on_osc_pin_state = false;
-const int TURN_ON_OSC_PIN = 53;
+const int TURN_ON_OSC_PIN = 3;
 const int MAX_TIMER_CYCLES = 108; // 52*2 kHz timer --> 1 ms passes after 108 cycles
 const int MAX_NUM_PULSES = 10; // send a burst of 10 square waves
 int numTimerCyclesPassed = -1;
@@ -34,23 +34,24 @@ bool Differential = 0; //A10 has to be used as input positive on giga r1, A11 as
 // Constants - WiFi
 const char* ssid = "Forest fire";
 const char* password = "firewall";
-const char* host = "10.83.186.237";  // Laptop IP
+const char* host = "10.60.225.237";  // Laptop IP
 const int hostPort = 4210;
 const int localPort = 2390;  // Port Arduino uses to send from
 
 // Constants - hammer
-const int NUM_READINGS_PAST_THRESH = 100;
+const int NUM_READINGS_PAST_THRESH = 120;
 const float MAX_DEV = 0.18; // max deviation of analogRead in volts to trigger
 
 // Constants - cuff
 // pins
-const int CALIBRATION_PIN = 23;
+const int CALIBRATION_PIN = 53;
 const int CHECKLIGHT_PIN = 51;
 // data
 const int DATA_LENGTH = 260;
 const int DATA_LENGTH_BEFORE_HAMMER = 180;
 const int NUM_PULSES_TO_SAVE = 2000; // total # of pulses
 const int NUM_PULSES_TO_SAVE_BEFORE_HAMMER = 5;
+const int NUM_CHANNELS = 6; 
 
 // Wifi variables
 WiFiUDP udp;
@@ -157,14 +158,14 @@ void setup() {
 /////////////////////////////////////////// Transmit data things
 
 bool sendTCPPacketAndWaitForAck(uint8_t* data, int length, int numPacketsSent) {
-  const int MAX_RETRIES = 5;
+  const int MAX_RETRIES = 500;
   int packetNum = numPacketsSent;
   for (int retry = 0; retry < MAX_RETRIES; retry++) {
     if (wired_connection) {
       // Serial.print("📤 Sending packet #");
       // Serial.print(packetNum);
       // Serial.println();
-      if (retry > 0) {
+      if (retry > 0) { 
         Serial.print(" (retry ");
         Serial.print(retry);
         Serial.print(")");
@@ -187,7 +188,7 @@ bool sendTCPPacketAndWaitForAck(uint8_t* data, int length, int numPacketsSent) {
       Serial.println(packetNum);
     }
 
-    // Wait for ACK
+    // Wait for ACK (up to 5 seconds)
     unsigned long t_start = millis();
     while (millis() - t_start < 5000) {
       if (!client.connected()) {
@@ -200,8 +201,10 @@ bool sendTCPPacketAndWaitForAck(uint8_t* data, int length, int numPacketsSent) {
         ack.trim();
         String expectedAck = "ACK" + String(packetNum);
         if (ack == expectedAck) {
-          // if (wired_connection) Serial.println("✅ " + ack + " received");
-          
+            if (wired_connection) {
+              Serial.print("✅ ACKed packet "); // debug 
+              Serial.println(packetNum); // debug
+            }
           // Timing -- comment out later
           if (testing_timing) {
             Serial.print("      Took ");
@@ -212,13 +215,13 @@ bool sendTCPPacketAndWaitForAck(uint8_t* data, int length, int numPacketsSent) {
           return true;
         } else {
           if (wired_connection) {
-            Serial.print("❌ Unexpected ACK: ");
+            Serial.print(" Unexpected ACK: ");
             Serial.println(ack);
           }
         }
       }
 
-      delay(10);
+      delay(1);
     }
 
     if (wired_connection) Serial.println("⏱️ ACK wait timed out");
@@ -233,6 +236,7 @@ bool sendTCPPacketAndWaitForAck(uint8_t* data, int length, int numPacketsSent) {
 
 void transmitOverTCP() {
   /////////////////////////////////////////////////////////////////// WIFI STUFF
+
   if (WiFi.status() != WL_CONNECTED) connectWifi();
 
   if (!client.connected()) {
@@ -244,7 +248,7 @@ void transmitOverTCP() {
   }
 
   /////////////////////////////////////////////////////////////////// CALCULATING DATA
-  int num_pulses_to_save = calibrating ? 1 : NUM_PULSES_TO_SAVE;
+  int num_pulses_to_save = calibrating ? 1 : NUM_PULSES_TO_SAVE;  // DATA STUFF
   float time_to_print = 0;
   float cuff1_voltage_to_print = 0;
   float cuff2_voltage_to_print = 0;
@@ -252,7 +256,16 @@ void transmitOverTCP() {
   float hammer_voltage_to_print = 0;
   float emg_voltage_to_print = 0;
 
-  int i_initial = start_data_it * DATA_LENGTH;
+  const int NUM_CHANNELS = 6;                                     // PACKETING STUFF
+  const int SAMPLES_PER_PACKET = 500;
+  int expectedSamples = num_pulses_to_save * DATA_LENGTH;
+  int totalSamples = DATA_LENGTH * num_pulses_to_save;
+  float sampleBuf[NUM_CHANNELS]; // a temporary per-sample holder (6 floats)
+  static float packetBuf[SAMPLES_PER_PACKET * NUM_CHANNELS]; // our binary packet buffer
+  int samplesInPacket = 0;
+  int packetCount = 0;
+
+  int i_initial = start_data_it * DATA_LENGTH;                    // ITERATION STUFF
   int arr_len = DATA_LENGTH * num_pulses_to_save;
   int which_it = start_data_it;
   int last_it = -1;
@@ -287,207 +300,71 @@ void transmitOverTCP() {
     if (hammer_data[i % arr_len] != 0)
       hammer_voltage_to_print = hammer_data[i % arr_len] * 3.3 / pow(2, Resolution);
       
-    ///////////////////////////////////////////////////////////////////// SENDING DATA
+    /////////////////////////////////////////////////////////////////// TRANSMITTING DATA
+    // pack them
+    sampleBuf[0] = time_to_print;
+    sampleBuf[1] = cuff1_voltage_to_print;
+    sampleBuf[2] = cuff2_voltage_to_print;
+    sampleBuf[3] = cuff3_voltage_to_print;
+    sampleBuf[4] = hammer_voltage_to_print;
+    sampleBuf[5] = emg_voltage_to_print;
 
-    char line[100];
-    snprintf(line, sizeof(line),
-             "%.6f, %.3f, %.3f, %.3f, %.3f, %.3f\n",
-             time_to_print, cuff1_voltage_to_print, cuff2_voltage_to_print,
-             cuff3_voltage_to_print, hammer_voltage_to_print, emg_voltage_to_print);
+    if (samplesInPacket >= SAMPLES_PER_PACKET) { // drift detected before we even copy
+      if (wired_connection) Serial.println("❌ samplesInPacket overflow (before memcpy)");
+      samplesInPacket = 0;            // resynchronise safely
+    }
 
-    int lineLen = strlen(line);
-    if (bufferIndex + lineLen < lenBuffer) {
-      memcpy(packetBuffer + bufferIndex, line, lineLen);
-      bufferIndex += lineLen;
-      lineCount++;
-    } else {
+    // copy into packet buffer
+    int base = samplesInPacket * NUM_CHANNELS;
+    memcpy(&packetBuf[base], sampleBuf, sizeof(sampleBuf));
+    samplesInPacket++;
+
+    if (samplesInPacket > SAMPLES_PER_PACKET) { 
+      // copied OK, but counter drifted anyway
+      if (wired_connection) Serial.println("❌ samplesInPacket overflow (after memcpy)");
+      samplesInPacket = 0;
+    } else if (samplesInPacket == SAMPLES_PER_PACKET) {
       if (wired_connection) {
-        Serial.print("Error: bufferIndex = ");
-        Serial.print(bufferIndex);
-        Serial.print(" + lineLen = ");
-        Serial.print(lineLen);
-        Serial.print(">=");
-        Serial.println(lenBuffer);
+        Serial.print("Sending packet ");
+        Serial.println(packetCount);
       }
+      sendTCPPacketAndWaitForAck( (uint8_t*)packetBuf,
+                                  samplesInPacket * NUM_CHANNELS * sizeof(float),
+                                  packetCount++ );
+      samplesInPacket = 0;            // reset for next packet
     }
 
-    if (lineCount == linesPerPacket) {
-      if (!sendTCPPacketAndWaitForAck((uint8_t*)packetBuffer, bufferIndex, numPacketsSent)) {
-        // Could retry here more globally, or just give up
-        if (wired_connection) Serial.println("  Couldn't send packet. Aborting.");
-        bufferIndex = 0;
-        lineCount = 0;
-        client.stop();
-        return;
-      }
-      bufferIndex = 0;
-      lineCount = 0;
-      numPacketsSent++;
-    }
+    last_it = which_it; // Update interation
+  } // end pulse loop
 
-    last_it = which_it;
-  }
-
-  if (lineCount > 0) {  // Send the last packet
-    client.write((uint8_t *)packetBuffer, bufferIndex);
-  }
-
-  // Send end marker
-  client.write("============\n");
-  client.stop();
-  numPacketsSent = 0;
-}
-
-bool sendUDPPacketAndWaitForAck(uint8_t* data, int length, int numPacketsSent) {
-  const int MAX_RETRIES = 3;
-  int packetNum = numPacketsSent;
-  for (int retry = 0; retry < MAX_RETRIES; retry++) {
+  // tail-send any remainder
+  if (samplesInPacket > 0) {
     if (wired_connection) {
-      // Serial.print("📤 Sending packet #");
-      // Serial.print(packetNum);
-      // Serial.println();
-      if (retry > 0) {
-        Serial.print(" (retry ");
-        Serial.print(retry);
-        Serial.print(")");
-        Serial.println();
-      }
+      Serial.print("Sending final packet ");
+      Serial.println(packetCount);
     }
-
-    // Write data
-    char header[16];          // header
-    snprintf(header, sizeof(header), "PACKET%d\n", numPacketsSent);
-    udp.beginPacket(host, hostPort);
-    udp.write((uint8_t*)header, strlen(header)); // send header
-    udp.write((uint8_t*)data, length); // send rest of packet
-    udp.endPacket();
-
-    // Wait for ACK
-    unsigned long t_start = millis();
-    while (millis() - t_start < 5000) {
-      int len = udp.parsePacket();
-      if (len > 0) {
-        char ack[32];
-        udp.read(ack, sizeof(ack));
-        ack[len] = '\0';
-        char expected[16];
-        snprintf(expected, sizeof(expected), "ACK%d", packetNum);
-        if (strncmp(ack, expected, strlen(expected)) == 0) return true;
-      }
-      delay(5);
-    }
-
-    Serial.println("⏱️ ACK wait timed out");
+    sendTCPPacketAndWaitForAck(
+      (uint8_t*)packetBuf,
+      samplesInPacket * NUM_CHANNELS * sizeof(float), 
+      packetCount
+    );
+    packetCount++;
+    samplesInPacket = 0;
   }
-  
+
   if (wired_connection) {
-    Serial.print("❌ Failed to receive ACK for packet ");
-    Serial.println(packetNum);
-  }
-  return false;
-}
-
-void transmitOverUDP() {
-
-  if (WiFi.status() != WL_CONNECTED) connectWifi();
-  udp.begin(localPort);
-
-  /////////////////////////////////////////////////////////////////// CALCULATING DATA
-  int num_pulses_to_save = calibrating ? 1 : NUM_PULSES_TO_SAVE;
-  float time_to_print = 0;
-  float cuff1_voltage_to_print = 0;
-  float cuff2_voltage_to_print = 0;
-  float cuff3_voltage_to_print = 0;
-  float hammer_voltage_to_print = 0;
-  float emg_voltage_to_print = 0;
-
-  int i_initial = start_data_it * DATA_LENGTH;
-  int arr_len = DATA_LENGTH * num_pulses_to_save;
-  int which_it = start_data_it;
-  int last_it = -1;
-  long it_start = 0;
-  long it_end = 0;
-
-  for (int i = i_initial; i - i_initial < arr_len; i++) {
-    which_it = (i / DATA_LENGTH) % num_pulses_to_save;
-
-    if (which_it != last_it) {
-      it_start = start_and_end_times[which_it * 2];
-      it_end = start_and_end_times[which_it * 2 + 1];
-    }
-
-    int i_within_it = i % DATA_LENGTH;
-    int num_samples_this_period = DATA_LENGTH;
-    if (it_start < hammerTriggeredTime) num_samples_this_period = DATA_LENGTH_BEFORE_HAMMER;
-    time_to_print = ((i_within_it * 1.0 * (it_end - it_start)) / (num_samples_this_period*1.0)) / 1000.0 +
-                    (it_start - hammerTriggeredTime) / 1000.0;
-
-    if (it_start < hammerTriggeredTime && i_within_it >= DATA_LENGTH_BEFORE_HAMMER) {
-      // just print last time and voltage at the end of the file
-      time_to_print = ((DATA_LENGTH_BEFORE_HAMMER * 1.0 * (it_end - it_start)) / (num_samples_this_period*1.0)) / 1000.0 +
-                    (it_start - hammerTriggeredTime) / 1000.0;
-    } else {
-      cuff1_voltage_to_print = cuff_reciever_1_data[i % arr_len] * 3.3 / pow(2, Resolution);
-      cuff2_voltage_to_print = cuff_reciever_2_data[i % arr_len] * 3.3 / pow(2, Resolution);
-      cuff3_voltage_to_print = cuff_reciever_3_data[i % arr_len] * 3.3 / pow(2, Resolution);
-      emg_voltage_to_print = emg_data[which_it] * 3.3 / pow(2, Resolution);
-    }
-
-    if (hammer_data[i % arr_len] != 0)
-      hammer_voltage_to_print = hammer_data[i % arr_len] * 3.3 / pow(2, Resolution);
-      
-    ///////////////////////////////////////////////////////////////////// SENDING DATA
-
-    char line[100];
-    snprintf(line, sizeof(line),
-             "%.6f, %.3f, %.3f, %.3f, %.3f, %.3f\n",
-             time_to_print, cuff1_voltage_to_print, cuff2_voltage_to_print,
-             cuff3_voltage_to_print, hammer_voltage_to_print, emg_voltage_to_print);
-
-    int lineLen = strlen(line);
-    if (bufferIndex + lineLen < lenBuffer) {
-      memcpy(packetBuffer + bufferIndex, line, lineLen);
-      bufferIndex += lineLen;
-      lineCount++;
-    } else {
-      if (wired_connection) {
-        Serial.print("Error: bufferIndex = ");
-        Serial.print(bufferIndex);
-        Serial.print(" + lineLen = ");
-        Serial.print(lineLen);
-        Serial.print(">=");
-        Serial.println(lenBuffer);
-      }
-    }
-
-    // Send if 10 lines collected
-    if (lineCount == linesPerPacket) {
-      if (!sendUDPPacketAndWaitForAck((uint8_t*)packetBuffer, bufferIndex, numPacketsSent)) {
-          // Could retry here more globally, or just give up
-          if (wired_connection) Serial.println("  Couldn't send packet. Aborting.");
-          bufferIndex = 0;
-          lineCount = 0;
-          return;
-      }
-
-      bufferIndex = 0;
-      lineCount = 0;
-      numPacketsSent++;   
-    }
-    
-    last_it = which_it;
+    Serial.print("Expected samples: ");
+    Serial.println(expectedSamples);
+    Serial.print("Packets sent   : ");
+    Serial.println(packetCount);
+    Serial.print("Remainder samp.: ");
+    Serial.println(samplesInPacket);
   }
 
-  if (lineCount > 0) {
-    udp.beginPacket(host, hostPort);
-    udp.write((uint8_t*)packetBuffer, bufferIndex);
-    udp.endPacket();
-  }
-
-  // Send end marker
-  udp.beginPacket(host, hostPort);
-  udp.write("============");
-  udp.endPacket();
+  // End
+  client.flush();     
+  delay(50);
+  client.stop();
   numPacketsSent = 0;
 }
 
