@@ -11,7 +11,7 @@
 bool wired_connection = false;
 bool testing_timing = false;
 volatile bool turn_on_osc_pin_state = false;
-const int TURN_ON_OSC_PIN = 3;
+const int TURN_ON_OSC_PIN = 52;
 const int MAX_TIMER_CYCLES = 108; // 52*2 kHz timer --> 1 ms passes after 108 cycles
 const int MAX_NUM_PULSES = 10; // send a burst of 10 square waves
 int numTimerCyclesPassed = -1;
@@ -44,7 +44,7 @@ const float MAX_DEV = 0.18; // max deviation of analogRead in volts to trigger
 
 // Constants - cuff
 // pins
-const int CALIBRATION_PIN = 53;
+const int CALIBRATION_PIN = 49;
 const int CHECKLIGHT_PIN = 51;
 // data
 const int DATA_LENGTH = 260;
