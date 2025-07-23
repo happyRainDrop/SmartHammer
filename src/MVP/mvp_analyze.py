@@ -226,6 +226,7 @@ def find_outliers_std(data, threshold=3):
     # Find outliers
     lower_outliers = data[data < lower_bound]
     upper_outliers = data[data > upper_bound]
+
     
     return lower_outliers, upper_outliers, lower_bound, upper_bound
 
@@ -291,7 +292,7 @@ def get_reshaped_array_from_arduino_csv(output_file, DATA_LENGTH, use_emg = Fals
     return [hammer_times, hammer_recieved, emg_recieved, cuff_times_reshaped, cuff_recieved_1_reshaped, 
             cuff_recieved_2_reshaped, cuff_recieved_3_reshaped, time_ticks, NUM_PULSES]
 
-def plot_heat_map(input_files, folder_path = files_folder_path, png_name = "cuff_hammer_emg_combined", stddev = 2, use_emg = False, normalize_to_initial = True):
+def plot_heat_map(input_files, folder_path = files_folder_path, png_name = "cuff_hammer_emg_combined", stddev = 1.5, use_emg = True, normalize_to_initial = True):
     '''
     Plots hammer hit versus cuff heatmap, and allows user to select an area to search for the maximum intensity in. \n
 
@@ -315,17 +316,19 @@ def plot_heat_map(input_files, folder_path = files_folder_path, png_name = "cuff
     '''
     
     # Retrieve the data we need for the heat map
-    start_index = 0
-    end_index = int(len(input_files[0]))
-    hammer_times = input_files[0][start_index:end_index]
-    hammer_recieved = input_files[1][start_index:end_index]
-    emg_recieved = input_files[2][start_index:end_index]
-    cuff_times_reshaped = input_files[3][start_index:end_index]
-    cuff_recieved_1_reshaped = input_files[4][start_index:end_index]
-    cuff_recieved_2_reshaped = input_files[5][start_index:end_index]
-    cuff_recieved_3_reshaped = input_files[6][start_index:end_index]
-    time_ticks = input_files[7][start_index:end_index]
+    start_pulse = 5
+    end_pulse = int(len(input_files[0]))
+    end_pulse = 2000
+    hammer_times = input_files[0][start_pulse*DATA_LENGTH:end_pulse*DATA_LENGTH]
+    hammer_recieved = input_files[1][start_pulse*DATA_LENGTH:end_pulse*DATA_LENGTH]
+    emg_recieved = input_files[2][start_pulse*DATA_LENGTH:end_pulse*DATA_LENGTH]
+    cuff_times_reshaped = input_files[3][start_pulse:end_pulse]
+    cuff_recieved_1_reshaped = input_files[4][start_pulse:end_pulse]
+    cuff_recieved_2_reshaped = input_files[5][start_pulse:end_pulse]
+    cuff_recieved_3_reshaped = input_files[6][start_pulse:end_pulse]
+    time_ticks = input_files[7][start_pulse:end_pulse]
     NUM_PULSES = input_files[8]
+    NUM_PULSES = end_pulse - start_pulse + 1
 
     # Filter (smoothen heatplot)
     cuff_recieved_1_reshaped = uniform_filter1d(cuff_recieved_1_reshaped, size=20, axis=0, mode='nearest')
